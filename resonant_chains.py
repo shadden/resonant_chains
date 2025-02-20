@@ -1,4 +1,3 @@
-
 import celmech as cm
 import numpy as np
 from celmech.canonical_transformations import CanonicalTransformation
@@ -19,14 +18,43 @@ def _explicit_mass_dependence_substitution(expression,N):
     mass_rule.update({M_i:(Mstar + m_i) for m_i,M_i in zip(m,M)})
     return expression.xreplace(L0rule).xreplace(mass_rule)
 
+def _get_nu_from_resonances(resonances):
+    N = len(resonances) - 2
+    nu = []
+    nu_i = sp.Mul(*[r[0] for r in resonances])
+    nu.append(nu_i)
+    nu1_denom = 1
+    i=0
+    for j,k in resonances:
+        nu_i *= (j-k)/sp.S(j)
+        if i<N-2:
+            nu1_denom *= (j-k)
+        nu.append(nu_i)
+        i+=1
+    jN,kN = resonances[-1]
+    nu = (jN - kN) * sp.Matrix(nu) / nu1_denom
+    return nu
+
+
 def _swap_entries(list,i1,i2):
     list[i1],list[i2] = list[i2],list[i1]
 
 class ResonantChain():
-    def __init__(self,resonances, masses,add_MMR_terms_kwargs = {}, add_secular_terms_kwargs = {}):
+    def __init__(self,
+    resonances, 
+    masses,
+    tau_alpha,
+    tau_e,
+    diss_p = 1,
+    add_MMR_terms_kwargs = {}, 
+    add_secular_terms_kwargs = {}
+    ):
         self.N = len(masses) + 1
         self.resonances = resonances
         self.masses = np.array(masses)
+        self.tau_alpha = tau_alpha
+        self.tau_e = tau_e
+        self.diss_p = diss_p
         kam,ct = get_resonant_chain_hamiltonian(
             resonances,
             masses,
@@ -50,8 +78,6 @@ class ResonantChain():
         for key in self._mass_symbols:
             self.Npars.pop(key,None)
         self.Npars.pop(dK2)
-        #self.Npars.pop(kappa1)
-        #self.Npars.pop(kappa2)
         self.Nflow = self.ham.flow.xreplace(self.Npars)
         self.Njac = self.ham.jacobian.xreplace(self.Npars)
 
@@ -77,6 +103,23 @@ class ResonantChain():
         self._kappa1_dot_func = sp.lambdify(self.arg_symbols,dkappa1_dt)
         self._kappa2_dot_func = sp.lambdify(self.arg_symbols,dkappa2_dt)
 
+        ########################
+        # Dissipative dynamics #
+        ########################
+        dis_vec,tau_e_symbols,tau_alpha_symbols,p_symbol = self._construct_dissipation_flow()
+        full_flow = sp.Matrix(list(self.Nflow) + [0]) + dis_vec
+        Nfull_flow = full_flow.xreplace(self.Npars)
+        self.full_symbols = self.arg_symbols + tau_alpha_symbols + tau_e_symbols + [p_symbol]
+        self._full_flow_func = sp.lambdify(self.full_symbols,Nfull_flow)
+        dyvars = self.full_symbols[:self.ham.N_dim+1]
+        Nfull_jac = sp.Matrix(self.ham.N_dim+1,self.ham.N_dim+1,lambda i,j: sp.diff(Nfull_flow[i],dyvars[j]))
+        self._full_jac_func = sp.lambdify(self.full_symbols,Nfull_jac)
+
+    def f_dis(self,y):
+        return self._full_flow_func(*y,*self.masses,*self.tau_alpha,*self.tau_e,self.diss_p).reshape(-1)
+    def Df_dis(self,y):
+        return self._full_jac_func(*y,*self.masses,*self.tau_alpha,*self.tau_e,self.diss_p)
+
     def _initialize_ct(self,ct):
         canonical_vars_matrix = sp.Matrix([
             sp.symbols("lambda{0},eta{0},rho{0},Lambda{0},kappa{0},sigma{0}".format(i)) for i in range(1,self.N)
@@ -85,33 +128,76 @@ class ResonantChain():
         canonical_vars_matrix = _explicit_mass_dependence_substitution(canonical_vars_matrix,self.N)
         canonical_vars_matrix = canonical_vars_matrix.xreplace(self.Npars)
         self._canonical_vars_matrix_func = sp.lambdify(self.arg_symbols,canonical_vars_matrix)
-    def kappa1_dot(self,x,dK2val,masses):
-        return self._kappa1_dot_func(*x,dK2val,*masses)
-    def kappa2_dot(self,x,dK2val,masses):
-        return self._kappa2_dot_func(*x,dK2val,*masses)
-    def f(self,x,dK2val,masses):
-        return self._flow_func(*x,dK2val,*masses).reshape(-1)
-    def Df(self,x,dK2val,masses):
-        return self._jac_func(*x,dK2val,*masses)
-    def solve_eq_x1(self,x1,masses,guess = None):
+    def kappa1_dot(self,x,dK2val):
+        return self._kappa1_dot_func(*x,dK2val,*self.masses)
+    def kappa2_dot(self,x,dK2val):
+        return self._kappa2_dot_func(*x,dK2val,*self.masses)
+    def f(self,x,dK2val):
+        return self._flow_func(*x,dK2val,*self.masses).reshape(-1)
+    def Df(self,x,dK2val):
+        return self._jac_func(*x,dK2val,*self.masses)
+    def solve_eq_x1(self,x1,guess = None,**kwargs):
         if guess is None:
             guess = np.zeros(self.ham.N_dim)
-        f = lambda x: self._flow_func_x1_par(*x,x1,*masses).reshape(-1)
-        Df = lambda x: self._jac_func_x1_par(*x,x1,*masses)
-        soln = newton_solve(f,Df,guess)
+        f = lambda x: self._flow_func_x1_par(*x,x1,*self.masses).reshape(-1)
+        Df = lambda x: self._jac_func_x1_par(*x,x1,*self.masses)
+        soln = newton_solve(f,Df,guess,**kwargs)
         dK2 = soln[self.i_x1]
         soln[self.i_x1] = x1
-        return soln, dK2, masses
-    def get_Poincare(self,x,dK2val,masses):
-        cvars_matrix = self._canonical_vars_matrix_func(*x,dK2val,*masses)
+        return soln, dK2
+    def get_Poincare(self,x,dK2val):
+        cvars_matrix = self._canonical_vars_matrix_func(*x,dK2val,*self.masses)
         particles = []
         varnames = "l,eta,rho,Lambda,kappa,sigma".split(",")
-        for m,cvars in zip(masses,cvars_matrix): 
+        for m,cvars in zip(self.masses,cvars_matrix): 
             kwargs = dict(zip(varnames,cvars))
             particle = cm.poincare.PoincareParticle(G=self.G,m=m,Mstar=self.Mstar,**kwargs)
             particles.append(particle)
         pvars = cm.Poincare(self.G,particles)
         return pvars
+    def _construct_dissipation_flow(self):
+
+        p = sp.symbols("p")
+        N_Phi = self.N - 3
+        tau_e = [cm.get_symbol(r"\tau_{{e\,{}}}".format(i)) for i in range(1,self.N)]
+        tau_alpha = [cm.get_symbol(r"\tau_{{\alpha\,{}}}".format(i)) for i in range(2,self.N)]
+        L10 = cm.poincare._get_Lambda0_symbol(1)    
+        Lambda = self.ct.old_qp_vars[3*(self.N-1)::3]
+        rho = [cm.poincare._get_Lambda0_symbol(i)/cm.poincare._get_Lambda0_symbol(1) for i in range(1,self.N)]
+        Gamma = [(self.ham.qp_vars[self.N-3+i]**2+ self.ham.qp_vars[self.ham.N_dof+self.N-3+i]**2)/2 for i in range(self.N-1)]
+        e_sq = [2* G  / r for G,L,r in zip(Gamma,Lambda,rho)]
+        gamma_e = [1/te for te in tau_e]
+        gamma_alpha =  [1/ta for ta in tau_alpha]
+        gamma_a = [2 * p * e_sq[0] * gamma_e[0] ] + [ g_alpha  +  2 * p * e2 * ge  for g_alpha,e2,ge in zip(gamma_alpha,e_sq[1:],gamma_e[1:])]
+        mtrx_fn = lambda i,j: sp.diff(get_Phi_i_of_Lambda(i),Lambda[j]) * L10
+        get_Phi_i_of_Lambda = lambda i: self.ct.new_to_old(self.ham.full_qp_vars[self.ham.full_N_dof+2+i])
+        dPhi_i_dLambda_j = sp.Matrix(N_Phi,self.N-1,mtrx_fn)
+        nu = _get_nu_from_resonances(self.resonances)
+        denom=0
+        dK2_dot_dis = 0
+        dPhi_dot_dis = sp.Matrix([0 for _ in range(N_Phi)])
+        for i in range(0,self.N-1):
+            denom += nu[i] * rho[i]
+            for l in range(i+1,self.N-1):
+                dK2_dot_dis += (nu[l] - nu[i]) * rho[i] * rho[l] * (gamma_a[l] - gamma_a[i]) / 2 
+                for j in range(N_Phi):
+                    dPhi_dot_dis[j] += (nu[l] * dPhi_i_dLambda_j[j,i] - nu[i] * dPhi_i_dLambda_j[j,l]) * rho[i] * rho[l] * (gamma_a[l] - gamma_a[i]) / 2
+        dK2_dot_dis /= denom 
+        dPhi_dot_dis /= denom
+        for i,ge in enumerate(gamma_e):
+            dK2_dot_dis += 2 * ge * Gamma[i] 
+
+        dis_vec = sp.Matrix([0 for _ in range(self.ham.N_dim+1)])
+        
+        dis_vec[-1] = dK2_dot_dis
+        for i,dPhi_dot in enumerate(dPhi_dot_dis):
+            dis_vec[self.ham.N_dof+i] = dPhi_dot
+            
+        for i in range(self.N-1):
+            dis_vec[self.N-3+i] = -gamma_e[i] * self.ham.qp_vars[self.N-3+i]
+            dis_vec[self.ham.N_dof + self.N-3+i] = -gamma_e[i] * self.ham.qp_vars[self.ham.N_dof + self.N-3+i]
+                            
+        return _explicit_mass_dependence_substitution(dis_vec,self.N),tau_e,tau_alpha,p
 
 def get_chain_rebound_sim(resonances, masses):
     sim = rb.Simulation()
@@ -170,8 +256,21 @@ def get_resonant_chain_hamiltonian(resonances, masses,add_MMR_terms_kwargs = {},
     pvars = cm.Poincare.from_Simulation(sim)
     pham = cm.PoincareHamiltonian(pvars)
     res_var_mtrx = resonant_chain_variables_transformation_matrix(resonances)
-    for i,pq in enumerate(resonances):
-        pham.add_MMR_terms(*pq,indexIn=i+1,indexOut=i+2,**add_MMR_terms_kwargs)
+    periods = []
+    period = 1
+    periods.append(period)
+    for j,k in resonances:
+        period *= j/sp.S(j-k)
+        periods.append(period)
+    for i1,p1 in enumerate(periods):
+        for i2,p2 in zip(range(i1+1,len(periods)),periods[i1+1:]):
+            pratio = p2/p1
+            p,q = int(sp.numer(pratio)),int(sp.numer(pratio) - sp.denom(pratio))
+            if q <= add_MMR_terms_kwargs['max_order']:
+                pham.add_MMR_terms(p,q,indexIn=i1+1,indexOut=i2+1,**add_MMR_terms_kwargs)
+
+    # for i,pq in enumerate(resonances):
+    #     pham.add_MMR_terms(*pq,indexIn=i+1,indexOut=i+2,**add_MMR_terms_kwargs)
     for i in range(1,sim.N):
         for j in range(i+1,sim.N):
             pham.add_secular_terms(indexIn=i,indexOut=j,**add_secular_terms_kwargs)
@@ -233,3 +332,16 @@ def newton_solve(fun,Dfun,guess,params=(),max_iter=100,rtol=1e-6,atol=1e-12):
     else:
         warnings.warn("did not converge")
     return y
+
+def tau_alphas_to_tau_as(tau_alpha,masses,resonances):
+    Npl = len(masses)
+    sma = np.ones(Npl)
+    mtrx = -1 * np.eye(Npl)
+    mtrx[:,0] = 1
+    for i,jk in enumerate(resonances):
+        j,k = jk
+        sma[i+1] = sma[i] * (j/(j-k))**(2/3)
+    mtrx[0] = masses/sma
+    gamma_alphas = np.concatenate(([0],1/np.array(tau_alpha)))
+    gamma_a = np.linalg.inv(mtrx) @ gamma_alphas
+    return 1/gamma_a
