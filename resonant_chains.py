@@ -5,6 +5,10 @@ import sympy as sp
 import rebound as rb
 from celmech.nbody_simulation_utilities import add_canonical_heliocentric_elements_particle
 import warnings
+
+_RT2 = np.sqrt(2)
+_RT2_INV = 1/_RT2
+
 def _explicit_mass_dependence_substitution(expression,N):
     L0 = [symbols(r"\Lambda_{{{0}\,0}}".format(i),positive=True) for i in range(1,N)]
     ai0 = [symbols(r"a_{{{0}\,0}}".format(i),positive=True) for i in range(1,N)]
@@ -39,6 +43,136 @@ def _get_nu_from_resonances(resonances):
 def _swap_entries(list,i1,i2):
     list[i1],list[i2] = list[i2],list[i1]
 
+from celmech.poisson_series import PSTerm,PoissonSeries
+def get_Hkep_series_res_variables(pham,Tmtrx):
+    r"""
+    Get Keplerian Hamiltonian
+    .. math::
+        n_i \delta\Lambda_i - \frac{3n_i}{2\Lambda_i} \delta\Lambda_i^2
+    as a Poisson series in resonat variables
+
+    Parameters
+    ----------
+    pham : celmech.poincare.PoincareHamiltonian
+        Base Hamiltonian to use in expansion
+    Tmtrx : ndarray
+        Transformation matrix defining the resonant variables. The matrix should be of the form returned by :func:`resonant_chain_variables_transformation_matrix`.n_
+
+    Returns
+    -------
+    PoissonSeries
+        PoissonSeries representation of Hamiltonian
+    """
+    Npl = pham.N-1
+    omega = np.array([p.n for p in pham.particles[1:]] + [0 for _ in range(2*Npl)])
+    Domega = np.diag([ -1.5 * p.n / p.Lambda for p in pham.particles[1:]] + [0 for _ in range(2*Npl)])
+    omega_new = omega @ Tmtrx.T
+    Domega_new = Tmtrx @ Domega @ Tmtrx.T
+    zero_N = np.zeros(Npl,dtype = int)
+    I_N = np.eye(Npl,dtype=int)
+    zero_2N = np.zeros(2*Npl,dtype = int)
+    I_2N = np.eye(2*Npl,dtype=int)
+
+    series_terms = []
+    for i in range(Npl):
+        if not np.isclose(omega_new[i],0):
+            series_terms.append(PSTerm(omega_new[i],zero_2N,zero_2N,I_N[i],zero_N))
+        if not np.isclose(omega_new[Npl + i],0):
+            series_terms.append(PSTerm(omega_new[i],I_2N[i+Npl],I_2N[i+Npl],zero_N,zero_N))
+        if not np.isclose(omega_new[2*Npl + i],0):
+            series_terms.append(PSTerm(omega_new[i],I_2N[2*Npl + i],I_2N[2*Npl + i],zero_N,zero_N))    
+        for j in range(Npl):
+            p = I_N[i] + I_N[j]
+            # p/p
+            new_term = PSTerm(Domega_new[i,j],zero_2N,zero_2N,p,zero_N)
+            series_terms.append(new_term)
+            
+            # p/e
+            new_term = PSTerm(Domega_new[i,j+Npl],I_2N[j],I_2N[j],I_N[i],zero_N)
+            series_terms.append(new_term)
+            
+            # p/I
+            new_term = PSTerm(Domega_new[i,j+2*Npl],I_2N[j+Npl],I_2N[j+Npl],I_N[i],zero_N)
+            series_terms.append(new_term)
+            
+            # e/p
+            new_term = PSTerm(Domega_new[i+Npl,j],I_2N[i],I_2N[i],I_N[j],zero_N)
+            series_terms.append(new_term)
+
+            # e/e
+            new_term = PSTerm(Domega_new[i+Npl,j+Npl],I_2N[i]+I_2N[j],I_2N[i]+I_2N[j],zero_N,zero_N)
+            series_terms.append(new_term)
+            
+            # e/I
+            new_term = PSTerm(Domega_new[i+Npl,j+2*Npl],I_2N[i]+I_2N[j+Npl],I_2N[i]+I_2N[j+Npl],zero_N,zero_N)
+            series_terms.append(new_term)
+
+            # I/p
+            new_term = PSTerm(Domega_new[i+2*Npl,j],I_2N[i+Npl],I_2N[i+Npl],I_N[j],zero_N)
+            series_terms.append(new_term)
+            
+            # I/e
+            new_term = PSTerm(Domega_new[i+2*Npl,j+Npl],I_2N[i+Npl]+I_2N[j],I_2N[i+Npl]+I_2N[j],zero_N,zero_N)
+            series_terms.append(new_term)
+            
+            # I/I
+            new_term = PSTerm(Domega_new[i+2*Npl,j+2*Npl],I_2N[i+Npl]+I_2N[j+Npl],I_2N[i+Npl]+I_2N[j+Npl],zero_N,zero_N)
+            series_terms.append(new_term)
+    
+    return PoissonSeries.from_PSTerms(series_terms)
+
+def transform_poincare_poisson_series(Tmtrx, series):   
+    """
+    Transform Poisson series in Poincare variables to a Poisson series in resonant variables.
+
+    Parameters
+    ----------
+    Tmtrx : ndarray
+        Transformation matrix defining the resonant variables. The matrix should be of the form returned by :func:`resonant_chain_variables_transformation_matrix`.
+
+    series : celmech.poisson_series.PoissonSeries
+        Series to transform
+
+    Returns
+    -------
+    celmech.poisson_series.PoissonSeries
+        Transformed Poisson series
+
+    Raises
+    ------
+    RuntimeError
+        _description_
+    """
+    Tmtrx_inv = np.linalg.inv(Tmtrx)
+    Npl = series.M
+    I_N = np.eye(Npl)
+    I_2N = np.eye(2*Npl)
+    zero_N = np.zeros(Npl)
+    new_series_terms = []
+    for term in series.terms:
+        newq = term.q @ Tmtrx_inv[:Npl,:Npl]
+        newq[1] += np.sum(term.k-term.kbar)
+        newq = np.round(newq).astype(int)
+        ptot = np.sum(term.p)
+        if ptot==0:
+            new_term = PSTerm(term.C,term.k,term.kbar,term.p,newq)
+            new_series_terms.append(new_term)
+        elif ptot==1:
+            i_Lambda = np.argmax(term.p)
+            for j,c in enumerate(Tmtrx.T[i_Lambda,:Npl]):
+                new_term = PSTerm(c*term.C,term.k,term.kbar,I_N[j],newq)
+                new_series_terms.append(new_term)
+            for j,c in enumerate(Tmtrx.T[i_Lambda,Npl:2*Npl]):
+                new_term = PSTerm(c*term.C,term.k + I_2N[j],term.kbar + I_2N[j],zero_N,newq)
+                new_series_terms.append(new_term)
+            for j,c in enumerate(Tmtrx.T[i_Lambda,2*Npl:]):
+                new_term = PSTerm(c*term.C,term.k + I_2N[Npl+j],term.kbar + I_2N[Npl+j],zero_N,newq)
+                new_series_terms.append(new_term)
+        else:
+            raise RuntimeError("Expansion in Lambdas beyond first order not supported!")
+    new_series = PoissonSeries.from_PSTerms(new_series_terms)
+    return new_series
+    
 class ResonantChain():
     def __init__(self,
     resonances, 
@@ -332,6 +466,18 @@ def newton_solve(fun,Dfun,guess,params=(),max_iter=100,rtol=1e-6,atol=1e-12):
     else:
         warnings.warn("did not converge")
     return y
+def newton_solve2(fun_and_Dfun,guess,params=(),max_iter=100,rtol=1e-6,atol=1e-12):
+    y = guess.copy()
+    for itr in range(max_iter):
+        f,Df = fun_and_Dfun(y,*params)
+        dy = -1 * lin_solve(Df,f)
+        y+=dy
+        if np.all( np.abs(dy) < rtol * np.abs(y) + atol ):
+            break
+    else:
+        warnings.warn("did not converge")
+    return y
+
 
 def tau_alphas_to_tau_as(tau_alpha,masses,resonances):
     Npl = len(masses)
@@ -345,3 +491,247 @@ def tau_alphas_to_tau_as(tau_alpha,masses,resonances):
     gamma_alphas = np.concatenate(([0],1/np.array(tau_alpha)))
     gamma_a = np.linalg.inv(mtrx) @ gamma_alphas
     return 1/gamma_a
+
+def hamiltonian_series_to_flow_series_list(ham_series):
+    r"""
+    Generate a list of Poisson series that can be evaluated to get the flow generated by the input Hamiltonian
+
+    Parameters
+    ----------
+    ham_series : celmech.poisson_series.PoissonSeries
+        Poisson series of the input Hamiltonian
+
+    Returns
+    -------
+    list
+        A list of :code:`celmech.poisson_series.PoissonSeries` objects giving the flow generated by the Hamiltonian.
+        The list entries are:
+        .. math::
+            \begin{pmatrix}
+                \frac{d}{dt}z_1
+                \\
+                \vdots
+                \\
+                \frac{d}{dt}z_N 
+                \\
+                \frac{d}{dt}P_1 
+                \\
+                \vdots
+                \\
+                \frac{d}{dt}P_M
+                \\
+                \frac{d}{dt}Q_1
+                \\
+                \vdots
+                \\
+                \frac{d}{dt}Q_M
+            \end{pmatrix}
+    """
+    I_N = np.eye(ham_series.N,dtype=int)
+    zero_N = np.zeros(ham_series.N,dtype=int)
+    I_M = np.eye(ham_series.M,dtype=int)
+    zero_M = np.zeros(ham_series.M,dtype=int)
+    flow_series_list = []
+    # dx/dt
+    for i in range(ham_series.N):
+        var_series = PSTerm(1,I_N[i],zero_N,zero_M,zero_M).as_series()
+        dxi_dt = ham_series.Lie_deriv(var_series)
+        flow_series_list.append(dxi_dt)
+        
+    # dP/dt 
+    for i in range(ham_series.M):
+        var_series = PSTerm(1,zero_N,zero_N,I_M[i],zero_M).as_series()
+        dPi_dt = ham_series.Lie_deriv(var_series)
+        flow_series_list.append(dPi_dt)
+    
+    # dQ/dt 
+    for i in range(ham_series.M):
+        var_series = PSTerm(1,zero_N,zero_N,zero_M,I_M[i]).as_series()
+        dexp_iQ_dt = ham_series.Lie_deriv(var_series)
+        factor = PSTerm(-1j,zero_N,zero_N,zero_M,-I_M[i]).as_series()
+        dQi_dt = factor * dexp_iQ_dt
+        flow_series_list.append(dQi_dt)
+    return flow_series_list
+
+def dseries_dQi(series,i):
+    return PoissonSeries.from_PSTerms([1j * term.q[i] * term for term in series.terms if term.q[i]], N=series.N, M=series.M)
+def dseries_dPi(series,i):
+    one_i = np.eye(series.M)[i]
+    return PoissonSeries.from_PSTerms([PSTerm(term.C * term.p[i], term.k,term.kbar,term.p - one_i,term.q) for term in series.terms if term.p[i]], N=series.N, M=series.M)
+def dseries_dzi(series,i):
+    one_i = np.eye(series.N)[i]
+    return PoissonSeries.from_PSTerms([PSTerm(term.C * term.k[i], term.k - one_i,term.kbar,term.p,term.q) for term in series.terms if term.k[i]], N=series.N, M=series.M)
+def dseries_dzbari(series,i):
+    one_i = np.eye(series.N)[i]
+    return PoissonSeries.from_PSTerms([PSTerm(term.C * term.kbar[i], term.k,term.kbar - one_i,term.p,term.q) for term in series.terms if term.kbar[i]], N=series.N, M=series.M)
+
+def real_vars_jacobian_series(complex_flow_series):
+    flow0 = complex_flow_series[0]
+    N,M = flow0.N,flow0.M
+    N_dim = 2 * (N+M)
+    jac = [[None for j in range(N_dim)] for i in range(N+2*M)]
+    for i,flow_i in enumerate(complex_flow_series):
+        for j in range(N):
+            df_dz = dseries_dzi(flow_i,j)
+            df_dzbar = dseries_dzbari(flow_i,j)
+            df_dy = 1j * _RT2_INV * (df_dzbar + -1*df_dz)
+            df_dx = _RT2_INV * (df_dzbar + df_dz)
+            jac[i][j] = df_dy
+            jac[i][N+M+j] = df_dx
+        for j in range(M):            
+            df_dP = dseries_dPi(flow_i,j)
+            df_dQ = dseries_dQi(flow_i,j)
+            jac[i][N+j] = df_dQ
+            jac[i][2*N+M+j] = df_dP
+    return jac
+
+def _real_flow_and_jacobian(X,complex_flow_list,jacobian_series,N,M):
+    y = X[:N]
+    Q = X[N:N+M]
+    x = X[N+M:2*N + M]
+    P = X[2*N + M:2*N + 2*M]
+    z = np.sqrt(0.5) * (x - 1j * y)
+    zdot = np.array([f(z,P,Q) for f in complex_flow_list[:N]])
+    Pdot = np.real([f(z,P,Q) for f in complex_flow_list[N:N+M]])
+    Qdot = np.real([f(z,P,Q) for f in complex_flow_list[N+M:]])
+    jj = np.array([[series(z,P,Q) for series in row] for row in jacobian_series])
+    dzdot_dvar = jj[:N,:]
+    dxdot_dvar = _RT2 * np.real(dzdot_dvar)
+    dydot_dvar = -_RT2 * np.imag(dzdot_dvar)
+    dPdot_dvar = np.real(jj[N:N+M,:])
+    dQdot_dvar = np.real(jj[N+M:,:])
+    return np.concatenate((-np.imag(zdot)*_RT2,Qdot,np.real(zdot)*_RT2,Pdot)),np.vstack([dydot_dvar,dQdot_dvar,dxdot_dvar,dPdot_dvar])
+
+def _real_flow(X,complex_flow_list,N,M):
+    y = X[:N]
+    Q = X[N:N+M]
+    x = X[N+M:2*N + M]
+    P = X[2*N + M:2*N + 2*M]
+    z = np.sqrt(0.5) * (x - 1j * y)
+    zdot = np.array([f(z,P,Q) for f in complex_flow_list[:N]])
+    Pdot = np.real([f(z,P,Q) for f in complex_flow_list[N:N+M]])
+    Qdot = np.real([f(z,P,Q) for f in complex_flow_list[N+M:]])
+    return np.concatenate((-np.imag(zdot)*_RT2,Qdot,np.real(zdot)*_RT2,Pdot))
+
+def _real_jacobian(X,jacobian_series,N,M):
+    y = X[:N]
+    Q = X[N:N+M]
+    x = X[N+M:2*N + M]
+    P = X[2*N + M:2*N + 2*M]
+    z = np.sqrt(0.5) * (x - 1j * y)
+    jj = np.array([[series(z,P,Q) for series in row] for row in jacobian_series])
+    dzdot_dvar = jj[:N,:]
+    dxdot_dvar = _RT2 * np.real(dzdot_dvar)
+    dydot_dvar = -_RT2 * np.imag(dzdot_dvar)
+    dPdot_dvar = np.real(jj[N:N+M,:])
+    dQdot_dvar = np.real(jj[N+M:,:])
+    return np.vstack([dydot_dvar,dQdot_dvar,dxdot_dvar,dPdot_dvar])
+               
+class ResonantChainPoissonSeries():
+    def __init__(self,resonances,masses,hpert_series,dK2=0,action_scale = None):
+        pham = cm.PoincareHamiltonian(cm.Poincare.from_Simulation(get_chain_rebound_sim(resonances,masses)))
+        self.pham = pham
+        self.Tmtrx = resonant_chain_variables_transformation_matrix(resonances)
+        self.Tmtrx_inv = np.linalg.inv(self.Tmtrx)
+        h_kep = get_Hkep_series_res_variables(pham,self.Tmtrx)
+        self.h_full_series  = h_kep + transform_poincare_poisson_series(self.Tmtrx,hpert_series)
+        self.complex_full_flow_list = hamiltonian_series_to_flow_series_list(self.h_full_series)
+        self.full_jacobian_list = real_vars_jacobian_series(self.complex_full_flow_list)
+        self.N_full = self.h_full_series.N
+        self.M_full = self.h_full_series.M
+        if not action_scale:
+            self._action_scale = pham.H_params[pham.Lambda0s[1]]
+        self.dK2 = dK2
+
+    @property
+    def action_scale(self):
+        return self._action_scale
+    
+    @action_scale.setter
+    def action_scale(self,val):
+        self._action_scale = val
+        self._reduce_series
+
+    @property
+    def dK2(self):
+        return self._dK2 / self.action_scale
+    
+    @dK2.setter
+    def dK2(self,val):
+        self._dK2 = val * self.action_scale
+        self._reduce_series()
+
+    def _reduce_series(self):
+        # Eliminate dependence on conserved quantities K1, K2        
+        mask = np.ones(self.M_full,dtype=bool)
+        mask[0] = False
+        mask[1] = False
+        vals = np.array([0,self.dK2])
+
+        # calculate degree of term in powers of action variables
+        term_deg = lambda term: np.sum(term.p) + 0.5*np.sum(term.k + term.kbar)
+
+        new_terms = []
+        for term in self.h_full_series.terms:
+            factor = np.prod(vals**term.p[np.logical_not(mask)]) * self.action_scale**(term_deg(term)-1)
+            if factor:
+                new_term = PSTerm(
+                    term.C * factor ,
+                    term.k,
+                    term.kbar,
+                    term.p[mask],
+                    term.q[mask]
+                )
+                new_terms.append(new_term)            
+        kam_series_reduced = PoissonSeries.from_PSTerms(new_terms)
+        # reduced hamiltonian
+        self.h_series = kam_series_reduced
+        self.complex_flow_list = hamiltonian_series_to_flow_series_list(self.h_series)
+        self.jacobian_list = real_vars_jacobian_series(self.complex_flow_list)
+
+        # reduced planar hamiltonian
+        N_planar = self.h_full_series.N // 2
+        planar_terms = [
+            PSTerm(
+                term.C,
+                term.k[:N_planar],
+                term.kbar[:N_planar],
+                term.p,
+                term.q
+            )
+            for term in self.h_series.terms 
+            if np.alltrue(term.k[N_planar:]==0) and np.alltrue(term.kbar[N_planar:]==0)
+        ]
+        self.h_planar_series = PoissonSeries.from_PSTerms(planar_terms)
+        self.planar_complex_flow_list = hamiltonian_series_to_flow_series_list(self.h_planar_series)
+        self.planar_jacobian_list = real_vars_jacobian_series(self.planar_complex_flow_list)
+
+
+    @property
+    def N(self):
+        return self.h_series.N
+    @property
+    def N_planar(self):
+        return self.h_planar_series.N
+    @property
+    def M(self):
+        return self.h_series.M
+    
+    def flow(self,X):
+        return _real_flow(X,self.complex_flow_list,self.N,self.M)
+    
+    def jacobian(self,X):
+        return _real_jacobian(X,self.jacobian_list,self.N,self.M)
+    
+    def flow_and_jacobian(self,X):
+        return _real_flow_and_jacobian(X,self.complex_flow_list,self.jacobian_list,self.N,self.M)
+        
+    def planar_flow(self,X):
+        return _real_flow(X,self.planar_complex_flow_list,self.N //2,self.M)
+    
+    def planar_jacobian(self,X):
+        return _real_jacobian(X,self.planar_jacobian_list,self.N//2,self.M)
+    
+    def planar_flow_and_jacobian(self,X):
+        return _real_flow_and_jacobian(X,self.planar_complex_flow_list,self.planar_jacobian_list,self.N//2,self.M)
+
