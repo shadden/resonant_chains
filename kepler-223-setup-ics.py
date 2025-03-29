@@ -2,6 +2,31 @@ import numpy as np
 from resonant_chains import *
 import rebound as rb
 from celmech.poisson_series import DFTerm_as_PSterms
+from celmech.lie_transformations import FirstOrderGeneratingFunction
+import numpy as np
+
+def print_Deltas_and_eccs(pvars,resonances):
+    ps = pvars.particles
+    print("Delta\te_in\te_out")
+    for pin,pout,res in zip(ps[1:],ps[2:],[(4,1),(3,1),(4,1)]):
+        j,k = res
+        Delta = (j-k)*pout.P/pin.P/j - 1
+        print(f"{Delta:0.5f}\t{pin.e:0.3f}\t{pout.e:0.3f}")   
+def get_chi(pvars,resonances):
+    chi  = FirstOrderGeneratingFunction(pvars)
+    for i in range(1,pvars.N-1):
+        chi.add_zeroth_order_term(indexIn=i,indexOut=i+1)
+        jj,_ = resonances[i-1]
+        for k in range(1,7):
+            j1p = k+jj
+            j1m = jj-k
+            chi.add_cosine_term([j1m,1-j1m,-1,0,0,0], indexIn=i,indexOut=i+1,l_max = 1)
+            chi.add_cosine_term([j1m,1-j1m,0,-1,0,0], indexIn=i,indexOut=i+1,l_max = 1)
+            chi.add_cosine_term([j1p,1-j1p,-1,0,0,0], indexIn=i,indexOut=i+1,l_max = 1)
+            chi.add_cosine_term([j1p,1-j1p,0,-1,0,0], indexIn=i,indexOut=i+1,l_max = 1)
+    for i in range(1,pvars.N-2):
+        chi.add_zeroth_order_term(indexIn=i,indexOut=i+2)
+    return chi
 
 m_earth = 3.e-6
 masses = np.array([7.4,5.1,8.0,4.8]) * m_earth
@@ -63,9 +88,43 @@ rc_poisson.dK2 = dP[1]
 guess = np.zeros(2*(rc_poisson.N_planar + rc_poisson.M))
 guess[rc_poisson.N_planar:rc_poisson.N_planar+rc_poisson.M]=np.array([np.pi,-np.pi/2])
 guess[-rc_poisson.M:] = dP[2:]
+
+print("Initial Deltas:")
+print_Deltas_and_eccs(rc_poisson.real_planar_vars_to_pvars(guess),resonances)
+
 xeq = newton_solve2(rc_poisson.planar_flow_and_jacobian,guess)
+
+print("Final Deltas:")
+print_Deltas_and_eccs(rc_poisson.real_planar_vars_to_pvars(xeq),resonances)
+
 f,Df = rc_poisson.planar_flow_and_jacobian(xeq)
 eigs = np.linalg.eigvals(Df)
 assert np.all(np.isclose(np.real(eigs),0)), "Non-zero real eigenvalue at equilibrium"
 
+if True:
+    #######################
+    # loop over dK2 values
+    #######################
+    N_dK2 = 10
+    dK2s = rc_poisson.dK2  - np.linspace(0,0.0125,N_dK2)
+    xeqs = np.zeros((N_dK2,xeq.size))
+    for i,dK2 in enumerate(dK2s):
+        rc_poisson.dK2 = dK2
+        xeq = newton_solve2(rc_poisson.planar_flow_and_jacobian,xeq)
+        xeqs[i] = xeq
+        pv = rc_poisson.real_planar_vars_to_pvars(xeq)
+        print(i)
+        print_Deltas_and_eccs(pv,resonances)
 
+    np.save("kep-223-xeqs",xeqs)
+    savedir = "kep223_files/equilibrium_configs/"
+    for i,xeq in enumerate(xeqs):
+        print("Getting rebound simulation for equilibrium point {}".format(i))
+        rc_poisson.dK2 = dK2s[i]
+        pv = rc_poisson.real_planar_vars_to_pvars(xeq)
+        sim_no_correction = pv.to_Simulation()
+        sim_no_correction.save_to_file(savedir+"kep-223-eq-no-correction-{}.bin".format(i))
+        chi = get_chi(pv,resonances)
+        chi.mean_to_osculating()
+        sim_corrected = pv.to_Simulation()
+        sim_corrected.save_to_file(savedir+"kep-223-eq-corrected-{}.bin".format(i))
