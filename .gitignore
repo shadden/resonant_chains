@@ -3,3 +3,6 @@
 *.png
 *.npy
 *.pyc
+kep223_files/kep223-f0.1_0.bin
+*.bin
+*.gz
