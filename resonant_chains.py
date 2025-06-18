@@ -645,13 +645,13 @@ def _real_jacobian(X,jacobian_series,N,M):
     return np.vstack([dydot_dvar,dQdot_dvar,dxdot_dvar,dPdot_dvar])
                
 class ResonantChainPoissonSeries():
-    def __init__(self,resonances,masses,hpert_series,dK2=0,action_scale = None):
+    def __init__(self,resonances,masses,hpert_series,dK2=0,action_scale = None,h0_order = 2):
         pham = cm.PoincareHamiltonian(cm.Poincare.from_Simulation(get_chain_rebound_sim(resonances,masses)))
         self.pham = pham
         self.Lambda0s = np.array([self.pham.H_params[L0] for L0 in self.pham.Lambda0s[1:]])
         self.Tmtrx = resonant_chain_variables_transformation_matrix(resonances)
         self.Tmtrx_inv = np.linalg.inv(self.Tmtrx)
-        h_kep = get_Hkep_series_res_variables(pham,self.Tmtrx)
+        h_kep = get_Hkep_series_res_variables(pham,self.Tmtrx,max_order=h0_order)
         self.h_full_series  = h_kep + transform_poincare_poisson_series(self.Tmtrx,hpert_series)
         self.complex_full_flow_list = hamiltonian_series_to_flow_series_list(self.h_full_series)
         self.full_jacobian_list = real_vars_jacobian_series(self.complex_full_flow_list)
