@@ -661,6 +661,25 @@ class ResonantChainPoissonSeries():
             self._action_scale = pham.H_params[pham.Lambda0s[1]]
         self.dK2 = dK2
 
+
+        # singly-reduced planar Hamiltonian
+        # i.e., dependence on dK1 eliminated, dependence on dK2 retained.
+        full_planar_terms = [
+            PSTerm(
+                term.C,
+                term.k[:self.N_planar],
+                term.kbar[:self.N_planar],
+                term.p[1:],
+                term.q[1:]
+            )
+            for term in self.h_full_series.terms
+            if np.alltrue(term.k[self.N_planar:]==0) and np.alltrue(term.kbar[self.N_planar:]==0) and term.p[0]==0
+        ]
+        h_full_planar_series = PoissonSeries.from_PSTerms(full_planar_terms)
+        assert np.alltrue([term.q[0]==0 for term in h_full_planar_series.terms])
+        self.planar_full_complex_flow_list = hamiltonian_series_to_flow_series_list(h_full_planar_series)
+        self.planar_full_jacobian_list = real_vars_jacobian_series(self.planar_full_complex_flow_list)
+
     @property
     def action_scale(self):
         return self._action_scale
@@ -723,7 +742,7 @@ class ResonantChainPoissonSeries():
         self.h_planar_series = PoissonSeries.from_PSTerms(planar_terms)
         self.planar_complex_flow_list = hamiltonian_series_to_flow_series_list(self.h_planar_series)
         self.planar_jacobian_list = real_vars_jacobian_series(self.planar_complex_flow_list)
-
+        
 
     @property
     def N(self):
@@ -735,6 +754,30 @@ class ResonantChainPoissonSeries():
     def M(self):
         return self.h_series.M
     
+    def _disflow_vars_to_planar_full_vars(self,arr):
+        N = self.N_planar
+        M = self.M
+        assert len(arr) == 2 * (N + M) + 1, "Input array must have length 2*(N+M)+1"
+        part1 = arr[:N]
+        zero = np.array([0])
+        part2 = arr[N:N+(M+N)]
+        part3 = np.array([arr[-1]]) # dK2
+        part4 = arr[2*N+M:2*N+2*M]
+        return np.concatenate([part1, zero, part2, part3, part4])
+    def planar_full_vars_to_disflow_vars(self,arr):
+        N = self.N_planar
+        M = self.M
+        assert len(arr) == 2 * (N + M) + 2, "Input array must have length 2*(N+M)+2"
+        #y, Qrest + x
+        return np.concatenate((arr[:N],arr[N+1:2*N+M+1],arr[2*N+M+2:],[arr[2*N+M+1]]))
+
+    
+    def planar_dissipative_flow(self,X):
+        X_planar_full = self._disflow_vars_to_planar_full_vars(X)
+        planar_full_flow = _real_flow(X_planar_full,self.planar_full_complex_flow_list,self.N_planar,self.M+1)
+        np.arange(self.M)
+        return self._disflow_vars_to_planar_full_vars
+
     def hamiltonian(self,X):
         return _real_hamiltonian(X,self.h_series,self.N,self.M)    
     
