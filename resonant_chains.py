@@ -842,6 +842,41 @@ class ResonantChainPoissonSeries():
             dis_jac[i_dK2,i_x] += 2 * gamma_e * X[i_x]
         return dis_jac
 
+    def planar_flow_with_dissipation(self,X,tau_e,tau_a,p):
+        shape = 2*(self.N_planar+self.M) + 1
+        msg = "Input X has dimensions {} but should be size ({},)".format(X.shape,shape)
+        assert X.size==2*(self.N_planar+self.M) + 1, msg
+        i_kappa2 = self.N_planar
+        X_full = np.insert(X,i_kappa2,0.)
+        f_cons = self.planar_full_flow(X_full)
+        f_dis = self.planar_dissipation_flow(X_full,tau_e,tau_a,p)
+        return np.delete(f_cons+f_dis,i_kappa2)
+    
+    def planar_jacobian_with_dissipation(self,X,tau_e,tau_a,p):
+        shape = 2*(self.N_planar+self.M) + 1
+        msg = "Input X has dimensions {} but should be size ({},)".format(X.shape,shape)
+        assert X.size==2*(self.N_planar+self.M) + 1, msg
+        i_kappa2 = self.N_planar
+        X_full = np.insert(X,i_kappa2,0.)
+        jac_cons = self.planar_full_jacobian(X_full)
+        jac_dis = self.planar_dissipation_jacobian(X_full,tau_e,tau_a,p)
+        return np.delete(np.delete(jac_cons+jac_dis,i_kappa2,axis=0),i_kappa2,axis=1)    
+    
+    def planar_flow_and_jacobian_with_dissipation(self,X,tau_e,tau_a,p):
+        shape = 2*(self.N_planar+self.M) + 1
+        msg = "Input X has dimensions {} but should be size ({},)".format(X.shape,shape)
+        assert X.size==2*(self.N_planar+self.M) + 1, msg
+        i_kappa2 = self.N_planar
+        X_full = np.insert(X,i_kappa2,0.)
+        f_cons,jac_cons = self.planar_full_flow_and_jacobian(X_full)
+        
+        f_dis = self.planar_dissipation_flow(X_full,tau_e,tau_a,p)
+        jac_dis = self.planar_dissipation_jacobian(X_full,tau_e,tau_a,p)
+        
+        f_tot = np.delete(f_cons+f_dis,i_kappa2)
+        jac_tot = np.delete(np.delete(jac_cons+jac_dis,i_kappa2,axis=0),i_kappa2,axis=1)
+        return f_tot,jac_tot
+    
     def planar_full_flow(self,X):
         return _real_flow(X,self.planar_full_complex_flow_list,self.N_planar,self.M+1)
     
