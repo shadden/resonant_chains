@@ -159,6 +159,7 @@ def transform_poincare_poisson_series(Tmtrx, series):
     for term in series.terms:
         newq = term.q @ Tmtrx_inv[:Npl,:Npl]
         newq[1] += np.sum(term.k-term.kbar)
+        assert np.all(np.isclose(np.mod(newq,1),0))
         newq = np.round(newq).astype(int)
         ptot = np.sum(term.p)
         if ptot==0:
@@ -179,6 +180,7 @@ def transform_poincare_poisson_series(Tmtrx, series):
             raise RuntimeError("Expansion in Lambdas beyond first order not supported!")
     new_series = PoissonSeries.from_PSTerms(new_series_terms)
     return new_series
+
     
 class ResonantChain():
     def __init__(self,
@@ -352,31 +354,120 @@ def get_chain_rebound_sim(resonances, masses):
     sim.move_to_com()
     return sim
 
+def transform_poincare_poisson_series(Tmtrx, series):   
+    """
+    Transform Poisson series in Poincare variables to a Poisson series in resonant variables.
+
+    Parameters
+    ----------
+    Tmtrx : ndarray
+        Transformation matrix defining the resonant variables. The matrix should be of the form returned by :func:`resonant_chain_variables_transformation_matrix`.
+
+    series : celmech.poisson_series.PoissonSeries
+        Series to transform
+
+    Returns
+    -------
+    celmech.poisson_series.PoissonSeries
+        Transformed Poisson series
+
+    Raises
+    ------
+    RuntimeError
+        _description_
+    """
+    Tmtrx_inv = np.linalg.inv(Tmtrx)
+    Npl = series.M
+    I_N = np.eye(Npl)
+    I_2N = np.eye(2*Npl)
+    zero_N = np.zeros(Npl)
+    new_series_terms = []
+    for term in series.terms:
+        newq = term.q @ Tmtrx_inv[:Npl,:Npl]
+        newq[1] += np.sum(term.k-term.kbar)
+        newq = np.round(newq).astype(int)
+        ptot = np.sum(term.p)
+        if ptot==0:
+            new_term = PSTerm(term.C,term.k,term.kbar,term.p,newq)
+            new_series_terms.append(new_term)
+        elif ptot==1:
+            i_Lambda = np.argmax(term.p)
+            for j,c in enumerate(Tmtrx.T[i_Lambda,:Npl]):
+                new_term = PSTerm(c*term.C,term.k,term.kbar,I_N[j],newq)
+                new_series_terms.append(new_term)
+            for j,c in enumerate(Tmtrx.T[i_Lambda,Npl:2*Npl]):
+                new_term = PSTerm(c*term.C,term.k + I_2N[j],term.kbar + I_2N[j],zero_N,newq)
+                new_series_terms.append(new_term)
+            for j,c in enumerate(Tmtrx.T[i_Lambda,2*Npl:]):
+                new_term = PSTerm(c*term.C,term.k + I_2N[Npl+j],term.kbar + I_2N[Npl+j],zero_N,newq)
+                new_series_terms.append(new_term)
+        else:
+            raise RuntimeError("Expansion in Lambdas beyond first order not supported!")
+    new_series = PoissonSeries.from_PSTerms(new_series_terms)
+    return new_series
+    
+def get_lambda_kvecs_in_df(resonances):
+    Npl = len(resonances)+1
+    P = 1
+    Periods = [P,]
+    for i,jk in enumerate(resonances):
+        j,k = jk
+        P *= j / sp.S(j-k)
+        Periods.append(P)
+    k_vecs_in_df = []
+    for i1 in range(Npl):
+        Pin = Periods[i1]
+        for i2 in range(i1+1,Npl):
+            row = np.zeros(Npl,dtype = int)
+            Pout = Periods[i2]
+            ratio = Pout/Pin
+            j = sp.numer(ratio)
+            k = j-sp.denom(ratio)
+            row[i1] = k-j
+            row[i2] = j
+            k_vecs_in_df.append(row)
+    return sp.Matrix(k_vecs_in_df)
+            
 def resonant_chain_variables_transformation_matrix(resonances):
     # number of planets
     N = len(resonances) + 1
-    A = np.zeros((3*N,3*N),dtype=int)
+    A = sp.Matrix(np.zeros((3*N,3*N),dtype = int))
     plast,qlast = resonances[-1]
-    A[0,N-2:N] = 1,-1 #-1,1
-    A[1,N-2] = qlast - plast
-    A[1,N-1] = plast
+    A[0,N-2] =  1 
+    A[0,N-1] = -1
+    A[1,N-2] = (qlast - plast) / sp.S(qlast)
+    A[1,N-1] = plast / sp.S(qlast)
     for i in range(N-2):
-        resvec1,resvec2 = np.zeros((2,N),dtype=int)
+        resvec1_numerators,resvec2_numerators = np.zeros((2,N),dtype=int)
         p1,q1 = resonances[i]
         p2,q2 = resonances[i+1]
-        resvec1[i] = q1 - p1
-        resvec1[i+1] = p1
-        resvec2[i+1] = q2 - p2
-        resvec2[i+2] = p2
-        row = resvec2 - resvec1
-        A[i+2,:N] = row #// np.gcd.reduce(row)
-    A[N:,N-2] = qlast - plast
-    A[N:,N-1] = plast
-    A[N:,N:] = np.eye(2*N,dtype=int)
-    # ensure det = 1
-    A  = np.array([row//np.gcd.reduce(row) for row in A],dtype=int)
-    return A
+        resvec1_numerators[i] = (q1 - p1)
+        resvec1_numerators[i+1] = p1
+        resvec2_numerators[i+1] = (q2 - p2)
+        resvec2_numerators[i+2] = p2
+        row = q1 * resvec2_numerators - q2 * resvec1_numerators
+        row = row.astype(int)//np.gcd.reduce(row.astype(int))
+        for j in range(N):
+            A[i+2,j] = row[j] #// np.gcd.reduce(row)
+            A[N+j,N+j] =  1
+            A[2*N+j,2*N+j] =  1
+            A[N+j,N-2] = (qlast - plast) / sp.S(qlast)
+            A[N+j,N-1] = plast / sp.S(qlast)
+            A[2*N+j,N-2] = (qlast - plast) / sp.S(qlast)
+            A[2*N+j,N-1] = plast / sp.S(qlast)
+    A_inv = A.inv()
+    k_vecs_in_df = get_lambda_kvecs_in_df(resonances)
+    C = sp.Matrix(np.eye(3*N,3*N,dtype=int))
+    new_kvecs = k_vecs_in_df * A_inv[:N,:N]
+    for l in range(N-2):
+        denoms = [sp.denom(u) for u in new_kvecs[:,2+l]]
+        nums = [sp.numer(u) for u in new_kvecs[:,2+l]]
+        c_inv = np.lcm.reduce(denoms) / sp.S(np.gcd.reduce(nums))
+        C[2+l,2+l] = 1/c_inv
+    return np.array(C*A,dtype = float) 
+
 from sympy import symbols
+
 def get_resonant_chain_new_variables(Npl):
     # angle variables
     kappa = sp.symbols("kappa(1:3)",real=True)
