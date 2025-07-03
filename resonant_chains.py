@@ -406,7 +406,7 @@ def transform_poincare_poisson_series(Tmtrx, series):
     new_series = PoissonSeries.from_PSTerms(new_series_terms)
     return new_series
     
-def get_lambda_kvecs_in_df(resonances):
+def get_lambda_kvecs_in_df(resonances,max_order = None):
     Npl = len(resonances)+1
     P = 1
     Periods = [P,]
@@ -415,6 +415,7 @@ def get_lambda_kvecs_in_df(resonances):
         P *= j / sp.S(j-k)
         Periods.append(P)
     k_vecs_in_df = []
+    max_order = max_order if max_order else np.inf
     for i1 in range(Npl):
         Pin = Periods[i1]
         for i2 in range(i1+1,Npl):
@@ -423,12 +424,13 @@ def get_lambda_kvecs_in_df(resonances):
             ratio = Pout/Pin
             j = sp.numer(ratio)
             k = j-sp.denom(ratio)
-            row[i1] = k-j
-            row[i2] = j
-            k_vecs_in_df.append(row)
+            if k<=max_order:
+                row[i1] = k-j
+                row[i2] = j
+                k_vecs_in_df.append(row)
     return sp.Matrix(k_vecs_in_df)
             
-def resonant_chain_variables_transformation_matrix(resonances):
+def resonant_chain_variables_transformation_matrix(resonances,max_order = None):
     # number of planets
     N = len(resonances) + 1
     A = sp.Matrix(np.zeros((3*N,3*N),dtype = int))
@@ -456,7 +458,7 @@ def resonant_chain_variables_transformation_matrix(resonances):
             A[2*N+j,N-2] = (qlast - plast) / sp.S(qlast)
             A[2*N+j,N-1] = plast / sp.S(qlast)
     A_inv = A.inv()
-    k_vecs_in_df = get_lambda_kvecs_in_df(resonances)
+    k_vecs_in_df = get_lambda_kvecs_in_df(resonances,max_order = max_order)
     C = sp.Matrix(np.eye(3*N,3*N,dtype=int))
     new_kvecs = k_vecs_in_df * A_inv[:N,:N]
     for l in range(N-2):
@@ -748,11 +750,11 @@ def _Lambda_comb_diss_deriv(a,b,gamma,rho):
     return result
                
 class ResonantChainPoissonSeries():
-    def __init__(self,resonances,masses,hpert_series,dK2=0,action_scale = None,h0_order = 2):
+    def __init__(self,resonances,masses,hpert_series,dK2=0,action_scale = None,h0_order = 2,max_order = None):
         pham = cm.PoincareHamiltonian(cm.Poincare.from_Simulation(get_chain_rebound_sim(resonances,masses)))
         self.pham = pham
         self.Lambda0s = np.array([self.pham.H_params[L0] for L0 in self.pham.Lambda0s[1:]])
-        self.Tmtrx = resonant_chain_variables_transformation_matrix(resonances)
+        self.Tmtrx = resonant_chain_variables_transformation_matrix(resonances,max_order=max_order)
         self.Tmtrx_inv = np.linalg.inv(self.Tmtrx)
         h_kep = get_Hkep_series_res_variables(pham,self.Tmtrx,max_order=h0_order)
         self.h_full_series  = h_kep + transform_poincare_poisson_series(self.Tmtrx,hpert_series)
@@ -1114,3 +1116,59 @@ class ResonantChainPoissonSeries():
         Q = real_vars[self.N:self.N+self.M]
         return np.concatenate((y[:self.N_planar],Q,x[:self.N_planar],P))
 
+def get_chain_hpert(resonances, masses, max_order,max_order_dl = 1):
+    """
+    Get Poisson series representation of interaction hamiltonian for a resonant chain. 
+    Terms up to a user-specified maximum order in eccentricities and inclinations are included.
+
+    Parameters
+    ----------
+    resonances : list
+        List of integer tuples [(j1,k1),...,(jN,kN)] specifying resonances between adjacent chain members.
+    masses : ndarray
+        planet masses
+    max_order : int
+        maximum order of eccentricity/inclination expansion
+    max_order_dl : int, optional
+        Maximum order of eccentricity/inclination expansion terms for which terms linear in delta-Lambda are included.
+        By default 1
+
+    Returns
+    -------
+    celmech.poisson_series.PoissonSeries
+        Series representation of Hamiltonian
+    """
+    sim = get_chain_rebound_sim(resonances,masses)
+    pvars = cm.Poincare.from_Simulation(sim)
+    pham = cm.PoincareHamiltonian(pvars)
+    periods = []
+    period = 1
+    periods.append(period)
+    for j,k in resonances:
+        period *= j/sp.S(j-k)
+        periods.append(period)
+    hpert_series_terms = []
+
+    ei_order = lambda k,nu: np.sum(np.abs(k[2:])) + 2*np.sum(nu)
+    for i1,p1 in enumerate(periods):
+        for i2,p2 in zip(range(i1+1,len(periods)),periods[i1+1:]):
+            pratio = p2/p1
+            p,q = int(sp.numer(pratio)),int(sp.numer(pratio) - sp.denom(pratio))
+            resonant_terms = cm.disturbing_function.list_resonance_terms(p,q,max_order = max_order)
+            if len(resonant_terms)>0:
+                print("adding terms for {}:{} MMR between {} and {}".format(p,p-q,i1+1,i2+1))
+            for k,nu in resonant_terms:
+                hpert_series_terms += cm.poisson_series.DFTerm_as_PSterms(pham,i1+1,i2+1,k,nu,(0,0))
+                if ei_order(k,nu) <= max_order_dl:
+                    hpert_series_terms += cm.poisson_series.DFTerm_as_PSterms(pham,i1+1,i2+1,k,nu,(1,0))
+                    hpert_series_terms += cm.poisson_series.DFTerm_as_PSterms(pham,i1+1,i2+1,k,nu,(0,1))
+
+    secular_terms = cm.disturbing_function.list_secular_terms(min_order=0,max_order = max_order)
+    for k,nu in secular_terms:
+        for i1 in range(1,sim.N):
+            for i2 in range(i1+1,sim.N):
+                hpert_series_terms += cm.poisson_series.DFTerm_as_PSterms(pham,i1,i2,k,nu,(0,0))
+                if ei_order(k,nu) <= max_order_dl:
+                    hpert_series_terms += cm.poisson_series.DFTerm_as_PSterms(pham,i1,i2,k,nu,(1,0))
+                    hpert_series_terms += cm.poisson_series.DFTerm_as_PSterms(pham,i1,i2,k,nu,(0,1))
+    return PoissonSeries.from_PSTerms(hpert_series_terms)
