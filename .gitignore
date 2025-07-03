@@ -3,3 +3,14 @@
 *.png
 *.npy
 *.pyc
+toi-1136
+.gitignore
+3br_2nd_order_mmr
+.gitignore
+high-order-mmr-debug.ipynb
+*-checkpoint.ipynb
+toi-1136_cc
+3br_2nd_order_mmr_cc
+3br_with_2nd_order_mmr.ipynb
+.gitignore
+RC.ipynb
