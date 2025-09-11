@@ -867,7 +867,8 @@ class ResonantChainPoissonSeries():
         # X = y_1,...,y_N,kappa_2,phi_1,...,phi_M,x_1,...,x_N,dK2,Phi_1,...,Phi_M
         #
         # dlna/dt = -1/tau_m - 2 p e^2/tau_e
-        Ndim = 2*(self.M+self.N_planar+1)
+        N_dof = (self.M+self.N_planar+1)
+        Ndim = 2*N_dof
         assert X.size==Ndim, "Input 'X' has dimension ({},) but should be dimension ({},)".format(X.size,Ndim)
         Npl = self.N_planar
         rho = self.Lambda0s/self.Lambda0s[0]
