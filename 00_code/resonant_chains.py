@@ -795,7 +795,7 @@ class ResonantChainPoissonSeries():
     @action_scale.setter
     def action_scale(self,val):
         self._action_scale = val
-        self._reduce_series
+        self._reduce_series()
 
     @property
     def dK2(self):
