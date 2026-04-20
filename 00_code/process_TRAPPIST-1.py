@@ -4,7 +4,7 @@ from resonant_chain_utils import Deltas_to_pvars
 from resonant_chains import get_chain_hpert, ResonantChainPoissonSeries,newton_solve2
 # load pandas data on system
 df_all_obs = get_metadata_observations()
-system_name = "HD110067"
+system_name = "TRAPPIST-1"
 
 import pandas as pd
 import requests

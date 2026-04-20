@@ -1116,7 +1116,47 @@ class ResonantChainPoissonSeries():
         P = real_vars[2*self.N+self.M:]
         Q = real_vars[self.N:self.N+self.M]
         return np.concatenate((y[:self.N_planar],Q,x[:self.N_planar],P))
+    
+    def planar_dissipation_jacobian_symbolic(self,X,p=1):
+        #
+        # X = y_1,...,y_N,kappa_2,phi_1,...,phi_M,x_1,...,x_N,dK2,Phi_1,...,Phi_M
+        #
+        # dlna/dt = -1/tau_m - 2 p e^2/tau_e
 
+        Ndim = 2*(self.M+self.N_planar+1)
+        Npl = self.N_planar
+        tau_e = [1/g for g in sp.symbols("gamma_e(1:{})".format(Npl+1),real=True)]
+        rho = self.Lambda0s/self.Lambda0s[0]
+        dis_jac = np.zeros((Ndim,Ndim),dtype=object)
+        D_gamma_a = np.zeros((Npl,Ndim),dtype=object)
+
+        Tinv_transpose = self.Tmtrx_inv.T
+
+        nu_vec = Tinv_transpose[0,:Npl]
+        for i in range(Npl):
+            i_x = i+Npl+self.M+1
+            D_gamma_a[i,i] = 4 * p * X[i] / tau_e[i] / rho[i]
+            D_gamma_a[i,i_x] = 4 * p * X[i_x] / tau_e[i] / rho[i]
+
+        K1_by_L10 = nu_vec @ rho
+        D_K1_by_L10 = -0.5 * (rho * nu_vec) @ D_gamma_a
+
+        for i,a_i in enumerate(Tinv_transpose[1:self.M+2,:Npl]):   
+            i_P = 2 * Npl + self.M + 1 + i
+            dis_jac[i_P] += -0.5 * rho * a_i @ D_gamma_a / K1_by_L10
+            dis_jac[i_P] += -1 * (a_i @ rho) * D_K1_by_L10 / (K1_by_L10**2)
+        dis_jac *= nu_vec @ rho
+
+        i_dK2 = 2 * Npl + self.M+1
+        for i in range(Npl):
+            gamma_e = 1/tau_e[i]
+            dis_jac[i,i] += -1 * gamma_e
+            i_x = i+Npl+self.M+1
+            dis_jac[i_x,i_x] += -1 * gamma_e
+            # dK2
+            dis_jac[i_dK2,i] += 2 * gamma_e * X[i]
+            dis_jac[i_dK2,i_x] += 2 * gamma_e * X[i_x]
+        return dis_jac
 def get_chain_hpert(resonances, masses, max_order,max_order_dl = 1):
     """
     Get Poisson series representation of interaction hamiltonian for a resonant chain. 

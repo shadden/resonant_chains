@@ -101,7 +101,7 @@ print("equilibrium shape =", np.asarray(eqC).shape)
 from celmech.disturbing_function import get_fg_coefficients
 
 guess = eqC.copy()
-dK2vals = dK20 + np.linspace(0.005,-0.005,80) 
+dK2vals = dK20 + np.linspace(0.005,-0.006,80) 
 eqsC = np.zeros((dK2vals.size,guess.size))
 jacobians = np.zeros((dK2vals.size,guess.size,guess.size))
 freqs = np.zeros((dK2vals.size,guess.size//2))
