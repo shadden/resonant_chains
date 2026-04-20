@@ -14,3 +14,5 @@ toi-1136_cc
 3br_with_2nd_order_mmr.ipynb
 .gitignore
 RC.ipynb
+01_notebooks/3_to_2_and_7_to_5_test.ipynb
+*.ipynb
