@@ -24,3 +24,11 @@ RC.ipynb
 .DS_Store
 __pycache__/
 *.pkl
+v1298_tau
+v1298_tau_cc
+v1298_tau
+03_data/_OLD/kepler-223_cc
+03_data/_OLD/kepler-223_migration_Dplus.extras
+03_data/_OLD/kepler-223_migration.extras
+03_data/_OLD/kepler-223-setup-ics.py
+04_figures/period_period.pdf
