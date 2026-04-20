@@ -16,3 +16,7 @@ toi-1136_cc
 RC.ipynb
 01_notebooks/3_to_2_and_7_to_5_test.ipynb
 *.ipynb
+*.txt
+*.log
+*.csv
+*.json
