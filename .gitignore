@@ -20,3 +20,7 @@ RC.ipynb
 *.log
 *.csv
 *.json
+*.npz
+.DS_Store
+__pycache__/
+*.pkl
