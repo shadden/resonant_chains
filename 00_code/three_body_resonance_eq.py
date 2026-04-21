@@ -72,7 +72,6 @@ def get_three_br_Hav_series(masses,resonances,Delta_in,
         # non-adjacent pair(s)
         for pair,resonance in nonadjacent_first_order_resonances.items():
             i1,i2 = pair
-            print("adding non-adjacent {}:{} resonance for {} and {}".format(*resonance,i1,i2))
             for k,nu in list_resonance_terms(*resonance,max_order=1,inclinations=False):
                 #add pairwise interactions between adjacent planets
                 series_terms += DFTerm_as_PSterms(pham,i1,i2,k,nu,(0,0))
@@ -125,7 +124,6 @@ def get_three_br_chi_series(masses,resonances,Delta_in,
     # non-adjacent pair(s)
     for pair,resonance in nonadjacent_first_order_resonances.items():
         i1,i2 = pair
-        print("adding non-adjacent {}:{} resonance for {} and {}".format(*resonance,i1,i2))
         for k,nu in list_resonance_terms(*resonance,max_order=1,inclinations=False):
             #add pairwise interactions between adjacent planets
             series_terms += DFTerm_as_PSterms(pham,i1,i2,k,nu,(0,0))
