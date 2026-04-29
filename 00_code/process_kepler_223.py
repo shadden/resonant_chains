@@ -14,7 +14,7 @@ import numpy as np
 # ----------------------------
 cache_dir = Path("/Users/hadden/Papers/10_chain_dynamics/03_data") / system_name
 cache_dir.mkdir(parents=True, exist_ok=True)
-max_order = 3
+max_order = 5
 
 # make the filename depend on what matters
 fname = f"{system_name}_maxorder{max_order}.npz"
@@ -57,12 +57,14 @@ if not save_path.exists():
         rvars[rc.N_planar + i] = 0.5 * np.pi / ratio
     print("initial guess:",rvars)
 
-    
+    rvars[rc.N_planar:rc.N_planar + rc.M] = np.array([175,75]) * np.pi / 180 
     rc.dK2 = dK20
     eqC = newton_solve2(rc.planar_flow_and_jacobian, rvars)
     f, Df = rc.planar_flow_and_jacobian(eqC)
     eigs = np.linalg.eigvals(Df)
     assert np.all(np.isclose(np.real(eigs), 0)), "Non-imaginary eigenvalues found."
+    eqC[rc.N_planar:rc.N_planar + rc.M] = np.mod(eqC[rc.N_planar:rc.N_planar + rc.M], 2 * np.pi)
+    print("angles:", eqC[rc.N_planar:rc.N_planar + rc.M] * 180 / np.pi)
     
     # --- save ---
     # .npz stores arrays; wrap scalars with np.asarray to be safe
@@ -85,7 +87,7 @@ else:
     dK20 = data["dK2"]
     eqC = data["equilibrium"]
     resonances = data['resonances']
-    hpert = get_chain_hpert(data["resonances"],data["masses"],3,1)
+    hpert = get_chain_hpert(data["resonances"],data["masses"],max_order=data["max_order"], max_order_dl=1)
     rc = ResonantChainPoissonSeries(data["resonances"],data["masses"],hpert,max_order = data["max_order"])
     rc.dK2 = dK20
     print(f"Loaded cached equilibrium from: {save_path}")

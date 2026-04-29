@@ -4,6 +4,52 @@ from celmech.nbody_simulation_utilities import add_canonical_heliocentric_elemen
 import rebound as rb
 import celmech as cm
 
+def damping_rate_tides(masses,resonances,radii, Qs = 100):
+    """
+    Compute the tidal damping timescales for a series of resonant planets.
+    Parameters
+    ----------
+    masses : list of floats
+        Masses of the planets in units of the stellar mass.
+    resonances : list of tuples
+        List of tuples (p, q) representing the resonances between adjacent planets.
+    radii : list of floats
+        Radii of the planets in units of inner planet's semi-major axis.
+    Qs : float or list of floats, optional
+        Tidal quality factors for the planets. If a single float is provided, it will be applied to all planets. Default is 100.
+    """
+    if isinstance(Qs, (int, float)):
+        Qs = [Qs] * len(masses)
+    
+    periods = np.cumprod(np.array([1] + list(map(lambda x: x[0]/(x[0]-x[1]),resonances))))
+    smas = periods**(2/3)
+    taus = (4/63) * (smas / radii)**5 * Qs * masses  * periods / (2 * np.pi)
+    return 1/taus
+
+
+def relative_damping_rate_tau_wave(masses,resonances,alpha = 1,beta = 0.25):
+    """
+    Compute the wave timescales for a series of resonant planets.
+    Parameters
+    ----------
+    masses : list of floats
+        Masses of the planets in units of the stellar mass.
+    resonances : list of tuples
+        List of tuples (p, q) representing the resonances between adjacent planets.
+    alpha : float, optional
+        Power-law index for the semi-major axis dependence of the surface density profile. Default is is 1.
+    beta : float, optional
+        Power-law index for the semi-major axis dependence of the disk flaring (H/R ~ a^beta). Default is 0.25.
+    """
+    taus = 1 / masses
+    periods = np.cumprod(np.array([1] + list(map(lambda x: x[0]/(x[0]-x[1]),resonances))))
+    smas = periods**(2/3)
+    sigma_asq_scaling = smas ** (2-alpha)
+    h_scaling = smas ** (beta)
+    taus = periods * taus  * h_scaling**4 / sigma_asq_scaling
+    gamma_rel = taus[0] / taus 
+    return gamma_rel
+
 def Deltas_to_pvars(Deltas,resonances,masses):
     sim = rb.Simulation()
     sim.add(m=1)

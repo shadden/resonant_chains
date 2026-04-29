@@ -32,3 +32,5 @@ v1298_tau
 03_data/_OLD/kepler-223_migration.extras
 03_data/_OLD/kepler-223-setup-ics.py
 04_figures/period_period.pdf
+03_data/TOI-178/toi178eqs.tar.gz
+03_data/Kepler-80-full/kep80eqs.tar.gz

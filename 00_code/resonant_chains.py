@@ -882,7 +882,7 @@ class ResonantChainPoissonSeries():
         nu_vec = Tinv_transpose[0,:Npl]
         K1_by_L10 = nu_vec @ rho
         K1dot_by_L10 = -0.5 * nu_vec @ (gamma_a * rho)
-        
+
         for i,a_i in enumerate(Tinv_transpose[1:self.M+2,:Npl]):
             dPdt = a_i @ (-0.5*rho*gamma_a)/ K1_by_L10 - (a_i @ rho) * K1dot_by_L10 / (K1_by_L10**2)
             dis_vec[2*self.N_planar + self.M + 1+i] = dPdt

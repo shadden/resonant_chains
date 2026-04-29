@@ -18,24 +18,32 @@ def parse_args():
         default="Kepler-60",
         help="System to analyze"
     )
+    p.add_argument(
+        "--max_order",
+        default=3,
+        type=int,
+        help="Maximum order for the resonant chain Hamiltonian expansion"
+    )
     return p.parse_args()
 
 def main():
     args = parse_args()
     system = args.system
+    max_order = args.max_order
     save_path = data_path+f"{system}/{system}_dissipation_info.npz"
-    eq_data = np.load(data_path+f"{system}/{system}_maxorder3.npz")
+    eq_data = np.load(data_path+f"{system}/{system}_maxorder{max_order}.npz")
     data = np.load(data_path+f"{system}/elliptic_eq_data.npz")
-    hpert = get_chain_hpert(eq_data['resonances'],eq_data['masses'],3,1)
+    hpert = get_chain_hpert(eq_data['resonances'],eq_data['masses'],max_order,1)
     rc = ResonantChainPoissonSeries(
         eq_data['resonances'],
         eq_data['masses'],
-        hpert,max_order = 3
+        hpert,max_order = max_order
     )
     i_kappa2 = rc.N_planar 
     Npl = rc.N_planar
     Ninf = np.ones(rc.N_planar) * np.inf
     damping_rate_coeffs = np.zeros((data['eqs'].shape[0],(rc.N_planar + rc.M) + 1,Npl))
+    eigvecs = np.zeros((data['eqs'].shape[0],(rc.N_planar + rc.M) + 1,2*(rc.N_planar + rc.M) + 1),dtype=complex)
 
     for i,(dK2,z_eq,freqs) in enumerate(zip(data['dK2vals'],data['eqs'],data['freqs'])):
         
@@ -69,6 +77,7 @@ def main():
         # test covector/vector pairing 
         assert np.all(np.isclose(covecs_extended @ vecs_extended.T,np.eye(covecs_extended.shape[0]))), "vector/covector mismatch!"
 
+        eigvecs[i] = vecs_extended
         j_dis_symb = rc.planar_dissipation_jacobian_symbolic(
             np.insert(z_extended_eq,i_kappa2,0)
         )
@@ -78,7 +87,7 @@ def main():
             [rate.coeff(g) for g in sp.symbols("gamma_e(1:{})".format(Npl+1),real=True)]
             for rate in damping_rates
         ],dtype=float)    
-    np.savez(save_path,damping_rate_coeffs=damping_rate_coeffs)
+    np.savez(save_path,damping_rate_coeffs=damping_rate_coeffs,eigvecs=eigvecs,dK2vals=data['dK2vals'],freqs=data['freqs'])
 
 if __name__ =="__main__":
     main()
