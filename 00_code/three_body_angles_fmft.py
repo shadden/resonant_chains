@@ -80,7 +80,6 @@ def compute_three_body_angle_time_series(sim,times,resonances):
     
     T = resonant_chain_variables_transformation_matrix(resonances,1)
     T = T[2:2+N3br,:Npl]
-    print(T)
     for i,t in enumerate(times):
         sim.integrate(t)
         mean_longitudes = np.array([p.l for p in sim.particles[1:]])
@@ -108,7 +107,7 @@ def fmft_reconstruct_signal(times,freq_amp_dict):
     for freq, amp in freq_amp_dict.items():
         signal += amp * np.exp(1j * freq * times)
     return signal.real
-def compute_angle_frequencies(times,angles):
+def compute_angle_frequencies(times,angles,Nmodes = None):
     """
     Compute frequencies of three-body angles using FMFT
 
@@ -126,7 +125,7 @@ def compute_angle_frequencies(times,angles):
     """
     freq_amp_dicts = []
     for i in range(angles.shape[1]):
-        freq_amp_dict = fmft(times,angles[:,i] - np.mean(angles[:,i]),2*(angles.shape[1]))
+        freq_amp_dict = fmft(times,angles[:,i] - np.mean(angles[:,i]),2*(angles.shape[1]) if Nmodes is None else 2 * Nmodes)
         freq_amp_dicts.append(freq_amp_dict)
     return freq_amp_dicts
 
@@ -137,6 +136,12 @@ def main():
         type=str, 
         required=True, 
         help="Name of the system to analyze (e.g., 'TOI-178')"
+    )
+    parser.add_argument(
+        "--author_id",
+        type=int,
+        default=None,
+        help="Author ID to select data from (overrides default preferences)"
     )
     parser.add_argument(
         "--i_start",
@@ -150,10 +155,36 @@ def main():
         default=10,
         help="Stopping index for the analysis"
     )
+
+    parser.add_argument(
+        "--plot",
+        action='store_true',
+        help="show diagnostic plots of the FMFT results"
+    )
+    parser.add_argument(
+        "--t_integrate",
+        type=float,
+        default=5e4,
+        help="Integration time in orbits for computing three-body angles"
+    )
+    parser.add_argument(
+        "--Nsamples",
+        type=int,
+        default=1024,
+        help="Number of samples for computing three-body angles"
+    )
+    parser.add_argument(
+        "--Nmodes",
+        type=int,
+        default=None,
+        help="Number of modes to determine frequencies and amplitudes for in FMFT"
+    )
+
     args = parser.parse_args()
     system_name = args.system
     i_start = args.i_start
     i_stop = args.i_stop
+    author_id = args.author_id
 
     # load pandas data on system
     df_all_obs = get_metadata_observations()
@@ -161,7 +192,12 @@ def main():
 
     print(f"Downloading samples for {system_name}")
     data_list = download_observations_samples(df_selected,None)
-    data = data_list[_preffered_author_id[system_name]]
+    data = data_list[_preffered_author_id[system_name] if author_id is None else author_id]
+    print(
+        f"Data for {system_name}: {data['nb_planets']} planets from {data['author_name']} with"+
+        f"\n \t e-prior: {data['eccentricity_prior']}"+ 
+        f"\n \t mass-prior: {data['mass_prior']}"
+    )
     Nplanets = data['nb_planets']
     df = data['samples']
 
@@ -175,19 +211,30 @@ def main():
         sim = dataframe_row_to_rebound_sim(df.iloc[i],Nplanets)
         sim.integrator = "whfast"
         sim.dt = sim.particles[1].P / 25
-        times = np.linspace(0, 5e4 * sim.particles[1].P, 512)
+        times = np.linspace(0, args.t_integrate * sim.particles[1].P, args.Nsamples)
 
         angles = compute_three_body_angle_time_series(sim,times,resonances)
-        angles = 180*angles/np.pi 
+        angles = 180*np.unwrap(angles,axis=0)/np.pi 
 
 
-        freq_amp_dicts = compute_angle_frequencies(times,angles)        
+        freq_amp_dicts = compute_angle_frequencies(times,angles,args.Nmodes)        
         all_fmft_results.append(freq_amp_dicts)
+    if args.plot:
+        fig,ax = plt.subplots(1,angles.shape[1],figsize=(10,4),sharex=True)
+        ax = np.atleast_1d(ax) 
+        for j in range(angles.shape[1]):
+            ax[j].plot(times,angles[:,j],label=f"Angle {j+1}")
+            ax[j].plot(times,np.mean(angles[:,j]) + fmft_reconstruct_signal(times,freq_amp_dicts[j]),label=f"Reconstructed {j+1}")
+
+        ax[-1].set_xlabel("Time [days]")
+        plt.tight_layout()
+        plt.show()
         
     # Save results to a file
-    pickle_path = data_dir / system_name / f"{system_name}_three_body_angles_fmft_{i_start}_{i_stop}.pkl"
-    with open(pickle_path, 'wb') as f:
-        pickle.dump(all_fmft_results, f)
-    print(f"Saved FMFT results to {pickle_path}")
+    if not args.plot:
+        pickle_path = data_dir / system_name / f"{system_name}_three_body_angles_fmft_{i_start}_{i_stop}_author_{data['author_name']}_e_{data['eccentricity_prior']}_m_{data['mass_prior']}.pkl"
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(all_fmft_results, f)
+        print(f"Saved FMFT results to {pickle_path}")
 if __name__ == "__main__":
     main()
