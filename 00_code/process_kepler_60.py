@@ -14,10 +14,11 @@ import numpy as np
 # ----------------------------
 cache_dir = Path("/Users/hadden/Papers/10_chain_dynamics/03_data") / system_name
 cache_dir.mkdir(parents=True, exist_ok=True)
-max_order = 3
+max_order = 5
+h0_order = 4
 
 # make the filename depend on what matters
-fname = f"{system_name}_maxorder{max_order}.npz"
+fname = f"{system_name}_maxorder{max_order}_h0order{h0_order}.npz"
 save_path = cache_dir / fname
 
 # ----------------------------
@@ -37,7 +38,7 @@ if not save_path.exists():
     # --- compute ---
 
     hpert = get_chain_hpert(resonances,masses,max_order,1)
-    rc = ResonantChainPoissonSeries(resonances,masses,hpert,max_order = max_order)
+    rc = ResonantChainPoissonSeries(resonances,masses,hpert,max_order = max_order,h0_order=h0_order)
     pvars = Deltas_to_pvars([0.001 for _ in resonances],resonances,masses)
     rvars, dK20 = rc.pvars_to_real_vars(pvars)
     print(dK20)
@@ -120,7 +121,7 @@ for i,dK2val in enumerate(dK2vals):
         Z[i,l] = np.abs((f_res[l] * zin + g_res[l] * zout) / np.sqrt(f_res[l] ** 2 + g_res[l] ** 2))
 
 np.savez(
-    cache_dir / "elliptic_eq_data.npz",
+    cache_dir / f"elliptic_eq_data_maxorder{max_order}_h0order{h0_order}.npz",
     dK2vals = dK2vals,
     eqs = eqsC,
     Periods = Periods,
