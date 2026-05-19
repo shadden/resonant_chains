@@ -42,9 +42,14 @@ def resonant_termQ(term,kvecs_3br):
 def get_three_br_Hav_series(masses,resonances,Delta_in,
                            jmax_fo = 10,# max first-order index
                            jmax_zo = 10,# max zeroth-order index
+                           include_primary_resonances = True
                            ):
         Npl = len(resonances) + 1
-        kvecs_3br = resonant_chain_variables_transformation_matrix(resonances,max_order=1)[2:Npl,:Npl].astype(int)
+        kvecs_3br = resonant_chain_variables_transformation_matrix(resonances)[2:Npl,:Npl]
+        assert np.all(np.isclose(kvecs_3br,np.round(kvecs_3br))),"kvecs_3br should be integer-valued for the resonant term filter to work properly."
+        kvecs_3br = kvecs_3br.astype(int)
+        assert np.all([np.gcd.reduce(kvec) == 1 for kvec in kvecs_3br]), "kvecs_3br should be primitive integer vectors for the resonant term filter to work properly."
+        
         new_q = lambda term : np.round(np.linalg.lstsq(kvecs_3br.T , term.q ,rcond=-1)[0]).astype(int)
 
         threeBR_filter = lambda term: resonant_termQ(term,kvecs_3br) and np.sum(term.p)<1 and np.sum(term.k)==0 and np.sum(term.kbar)==0
@@ -53,7 +58,10 @@ def get_three_br_Hav_series(masses,resonances,Delta_in,
         Deltas = Delta_inner_to_Deltas_3br(Delta_in,resonances)
         pvars = Deltas_to_pvars(Deltas,resonances,masses)
         pham = cm.PoincareHamiltonian(pvars)
-        nonadjacent_first_order_resonances = get_nonadjacent_first_order_resonances_dict(resonances)
+        if include_primary_resonances:
+            nonadjacent_first_order_resonances = get_nonadjacent_first_order_resonances_dict(resonances)
+        else:
+            nonadjacent_first_order_resonances = {}
         series_terms = []
         
         # first order MMRs
@@ -61,7 +69,9 @@ def get_three_br_Hav_series(masses,resonances,Delta_in,
             for k,nu in list_resonance_terms(m,1,max_order=1,inclinations=False):
                 # add pairwise interactions between adjacent planets
                 for pl_indx in range(1,pham.N-1):
-                    series_terms += DFTerm_as_PSterms(pham,pl_indx,pl_indx+1,k,nu,(0,0))
+                    pair_j,pair_k = resonances[pl_indx-1]
+                    if pair_j != m or pair_k != 1 or include_primary_resonances:
+                        series_terms += DFTerm_as_PSterms(pham,pl_indx,pl_indx+1,k,nu,(0,0))
                     
         # synodic terms
         for j in range(1,jmax_zo):
