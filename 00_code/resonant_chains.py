@@ -748,7 +748,7 @@ def _Lambda_comb_diss_deriv(a,b,gamma,rho):
             result += -0.5 * (a[i] * b[j] - a[j] * b[i]) * rho[i] * rho[j] * (gamma[i] - gamma[j])
     result /= (b @ rho)**2
     return result
-               
+
 class ResonantChainPoissonSeries():
     def __init__(self,resonances,masses,hpert_series,dK2=0,action_scale = None,h0_order = 2,max_order = None):
         pham = cm.PoincareHamiltonian(cm.Poincare.from_Simulation(get_chain_rebound_sim(resonances,masses)))

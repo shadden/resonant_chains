@@ -14,8 +14,8 @@ import numpy as np
 # ----------------------------
 cache_dir = Path("/Users/hadden/Papers/10_chain_dynamics/03_data") / system_name
 cache_dir.mkdir(parents=True, exist_ok=True)
-max_order = 5
-h0_order = 4
+max_order = 3
+h0_order = 2
 
 # make the filename depend on what matters
 fname = f"{system_name}_maxorder{max_order}_h0order{h0_order}.npz"
