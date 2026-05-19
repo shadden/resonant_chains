@@ -246,11 +246,13 @@ def main():
         for j in range(angles.shape[1]):
             ax[j].plot(times,angles[:,j],label=f"Angle {j+1}")
             ax[j].plot(times,np.mean(angles[:,j]) + fmft_reconstruct_signal(times,freq_amp_dicts[j]),label=f"Reconstructed {j+1}")
-
+            ax[j].legend()
         ax[-1].set_xlabel("Time [days]")
+
         plt.tight_layout()
         plt.show()
-        
+        for freq, amp in freq_amp_dicts[0].items():
+            print(f"Frequency: {freq:.4f}, Amplitude: {np.abs(amp):.4e}")
     # Save results to a file
     if not args.plot:
         pickle_path = data_dir / system_name / f"{system_name}_three_body_angles_fmft_{i_start}_{i_stop}_author_{data['author_name']}_e_{data['eccentricity_prior']}_m_{data['mass_prior']}.pkl"

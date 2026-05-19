@@ -39,6 +39,80 @@ def resonant_termQ(term,kvecs_3br):
     mtrx = np.concatenate([kvecs_3br,[term.q]])
     return np.linalg.matrix_rank(mtrx) < mtrx.shape[0]
 
+def get_second_order_three_br_terms(
+        resonances,masses,Delta_in,
+        jmax_fo = 10,# max first-order index
+        jmax_zo = 10,# max zeroth-order index
+):
+    """
+    Get three-body resonance terms at second order in masses. Similar
+    to get_three_br_Hav_series but does not perform a canonical transformation 
+    to new variables. This allows terms to be added to 'hpert' when constructing a 
+    ResonantChainPoissonSeries.
+
+    Parameters
+    ----------
+    resonances : list
+        List of integers specifying resonances of adjacent planets, e.g. [(2,1),(3,2)] for a 3-planet chain in 2:1 and 3:2 MMRs.
+    masses : list
+        List of planet-star mass ratios for each planet in the chain, e.g. [1e-5, 2e-5, 1.5e-5]
+    Delta_in : float
+        Inner planet's distance to its first-order resonance, defined as (P2/P1)/(j/(j-k)) - 1 where j,k are the integers of the first  
+    jmax_fo : int, optional
+        max first-order index, by default 10
+    jmax_zo : int, optional
+        max zeroth-order index, by default 10
+    Returns
+    -------
+    PoissonSeries
+        Poisson series containing second-order three-body resonance terms in original variables 
+        (not transformed to new variables where the three-body angles are explicit).
+    """
+    Npl = len(resonances) + 1
+    kvecs_3br = resonant_chain_variables_transformation_matrix(resonances)[2:Npl,:Npl]
+    assert np.all(np.isclose(kvecs_3br,np.round(kvecs_3br))),"kvecs_3br should be integer-valued for the resonant term filter to work properly."
+    kvecs_3br = kvecs_3br.astype(int)
+    assert np.all([np.gcd.reduce(kvec) == 1 for kvec in kvecs_3br]), "kvecs_3br should be primitive integer vectors for the resonant term filter to work properly."
+    
+    new_q = lambda term : np.round(np.linalg.lstsq(kvecs_3br.T , term.q ,rcond=-1)[0]).astype(int)
+
+    threeBR_filter = lambda term: resonant_termQ(term,kvecs_3br) and np.sum(term.p)<1 and np.sum(term.k)==0 and np.sum(term.kbar)==0
+    filter_series = lambda series,filt : cm.poisson_series.PoissonSeries.from_PSTerms([term for term in series.terms if filt(term)])
+
+    Deltas = Delta_inner_to_Deltas_3br(Delta_in,resonances)
+    pvars = Deltas_to_pvars(Deltas,resonances,masses)
+    pham = cm.PoincareHamiltonian(pvars)
+    series_terms = []
+    
+    # first order MMRs
+    for m in range(jmax_fo):
+        for k,nu in list_resonance_terms(m,1,max_order=1,inclinations=False):
+            # add pairwise interactions between adjacent planets
+            for pl_indx in range(1,pham.N-1):
+                pair_j,pair_k = resonances[pl_indx-1]
+                if pair_j != m or pair_k != 1:
+                    series_terms += DFTerm_as_PSterms(pham,pl_indx,pl_indx+1,k,nu,(0,0))
+                
+    # synodic terms
+    for j in range(1,jmax_zo):
+        for dl in [(0,0),(0,1),(1,0)]: 
+            for pl_indx in range(1,pham.N-1):
+                series_terms += DFTerm_as_PSterms(pham,pl_indx,pl_indx+1,(j, -j, 0, 0, 0, 0), (0, 0, 0, 0),dl)
+                    
+    pert_series = cm.poisson_series.PoissonSeries.from_PSTerms(series_terms)
+    
+    omega_vec = pham.calculate_flow()[:3*Npl:3]
+    Domega_vec = np.diag(pham.calculate_jacobian()[:3*Npl:3,pham.N_dof::3])
+    chi_series = cm.poisson_series.PoissonSeries_to_GeneratingFunctionSeries(
+        pert_series,
+        omega_vec,
+        Domega_vec
+    )
+    H2 = 0.5 * chi_series.Lie_deriv(pert_series)
+    
+    H2av = filter_series(H2,threeBR_filter)
+    return H2av 
+
 def get_three_br_Hav_series(masses,resonances,Delta_in,
                            jmax_fo = 10,# max first-order index
                            jmax_zo = 10,# max zeroth-order index
