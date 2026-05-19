@@ -11,7 +11,8 @@ import pickle
 _preffered_author_id = {
     "TOI-178" : 1,
     "Kepler-60": 3,
-    "Kepler-223" : 1
+    "Kepler-223" : 1,
+    "Kepler-80" : 1
 }
 data_dir = Path("/Users/hadden/Papers/10_chain_dynamics/03_data") 
 
@@ -77,15 +78,16 @@ def compute_three_body_angle_time_series(sim,times,resonances):
     Npl = len(sim.particles) - 1
     N3br = len(resonances) - 1
     angles = np.zeros((Nout,len(resonances)-1))
-    
+    mean_mean_motion_inner = sim.particles[1].n
     T = resonant_chain_variables_transformation_matrix(resonances,1)
     T = T[2:2+N3br,:Npl]
     for i,t in enumerate(times):
         sim.integrate(t)
         mean_longitudes = np.array([p.l for p in sim.particles[1:]])
         angles[i,:] = T @ mean_longitudes
+        mean_mean_motion_inner = (sim.particles[1].n + mean_mean_motion_inner * i) / (i+1)
     angles = np.mod(angles,2*np.pi)
-    return angles
+    return angles, mean_mean_motion_inner
 
 def fmft_reconstruct_signal(times,freq_amp_dict):
     """
@@ -107,7 +109,7 @@ def fmft_reconstruct_signal(times,freq_amp_dict):
     for freq, amp in freq_amp_dict.items():
         signal += amp * np.exp(1j * freq * times)
     return signal.real
-def compute_angle_frequencies(times,angles,Nmodes = None):
+def compute_angle_frequencies(times,angles,Nmodes = None,freqlimit = None):
     """
     Compute frequencies of three-body angles using FMFT
 
@@ -117,7 +119,10 @@ def compute_angle_frequencies(times,angles,Nmodes = None):
         Times corresponding to angle measurements
     angles : 2d array
         Three-body angles at each time (shape: [N_times, N_angles])
-
+    Nmodes : int, optional
+        Number of modes to determine frequencies and amplitudes for, by default None (determined by FMFT)
+    freqlimit : float, optional
+        Frequency limit for determining frequencies and amplitudes, by default None (no limit)
     Returns
     -------
     list of dicts
@@ -125,7 +130,13 @@ def compute_angle_frequencies(times,angles,Nmodes = None):
     """
     freq_amp_dicts = []
     for i in range(angles.shape[1]):
-        freq_amp_dict = fmft(times,angles[:,i] - np.mean(angles[:,i]),2*(angles.shape[1]) if Nmodes is None else 2 * Nmodes)
+        freq_amp_dict = fmft(
+            times,
+            angles[:,i] - np.mean(angles[:,i]),
+            2*(angles.shape[1]) if Nmodes is None else 2 * Nmodes,
+            min_freq = -1*np.abs(freqlimit) if freqlimit is not None else None,
+            max_freq = np.abs(freqlimit) if freqlimit is not None else None
+        )
         freq_amp_dicts.append(freq_amp_dict)
     return freq_amp_dicts
 
@@ -180,6 +191,14 @@ def main():
         help="Number of modes to determine frequencies and amplitudes for in FMFT"
     )
 
+    parser.add_argument(
+        "--freqlimit",
+        type=float,
+        default=None,
+        help="Frequency limit for determining frequencies and amplitudes in FMFT"
+    )
+
+
     args = parser.parse_args()
     system_name = args.system
     i_start = args.i_start
@@ -213,11 +232,13 @@ def main():
         sim.dt = sim.particles[1].P / 25
         times = np.linspace(0, args.t_integrate * sim.particles[1].P, args.Nsamples)
 
-        angles = compute_three_body_angle_time_series(sim,times,resonances)
+        angles, mean_mean_motion_inner = compute_three_body_angle_time_series(sim,times,resonances)
         angles = 180*np.unwrap(angles,axis=0)/np.pi 
 
+        freq_amp_dicts = compute_angle_frequencies(times,angles,args.Nmodes,freqlimit=args.freqlimit * mean_mean_motion_inner if args.freqlimit is not None else None)
 
-        freq_amp_dicts = compute_angle_frequencies(times,angles,args.Nmodes)        
+        # Normalize frequencies by mean motion of inner planet to get dimensionless frequencies
+        freq_amp_dicts = [{(key/mean_mean_motion_inner):val for key,val in d.items()} for d in freq_amp_dicts]
         all_fmft_results.append(freq_amp_dicts)
     if args.plot:
         fig,ax = plt.subplots(1,angles.shape[1],figsize=(10,4),sharex=True)
