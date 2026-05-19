@@ -46,9 +46,11 @@ def relative_damping_rate_tau_wave(masses,resonances,alpha = 1,beta = 0.25):
     smas = periods**(2/3)
     sigma_asq_scaling = smas ** (2-alpha)
     h_scaling = smas ** (beta)
-    taus = periods * taus  * h_scaling**4 / sigma_asq_scaling
-    gamma_rel = taus[0] / taus 
-    return gamma_rel
+    taus_e = periods * taus  * h_scaling**4 / sigma_asq_scaling
+    taus_a = periods * taus  * h_scaling**2 / sigma_asq_scaling
+    gamma_rel_e = taus_e[0] / taus_e 
+    gamma_rel_a = taus_a[0] / taus_a 
+    return gamma_rel_a, gamma_rel_e
 
 def Deltas_to_pvars(Deltas,resonances,masses):
     sim = rb.Simulation()
