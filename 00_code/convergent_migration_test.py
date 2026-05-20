@@ -2,12 +2,11 @@ import numpy as np
 import sys
 from matplotlib import pyplot as plt
 sys.path.insert(0,"../00_code/")
-
+from scipy.interpolate import interp1d
 import argparse
 from celmech.disturbing_function import list_resonance_terms
 from resonant_chains import get_chain_rebound_sim, get_chain_hpert, ResonantChainPoissonSeries
 from resonant_chain_utils import relative_damping_rate_tau_wave
-from scipy.optimize import linear_sum_assignment
 import sympy as sp
 data_path = "/Users/hadden/Papers/10_chain_dynamics/03_data/"
 system_name = "Kepler-60"
@@ -61,6 +60,13 @@ def main():
         dK2dot_all_migrate[i] = rc.planar_flow_with_dissipation(X,Ninf,tau_a,0)[i_dK2]
         tau_a[0] = np.inf
         dK2dot_inner_halted[i] = rc.planar_flow_with_dissipation(X,Ninf,tau_a,0)[i_dK2]
+    if np.any(dK2dot_inner_halted<0):
+        alpha_crit = interp1d(dK2dot_inner_halted,alpha_vals)(0)
+        print(f"Convergent migration can produce the observed equilibrium at alpha = {alpha_crit:.2f}")
+    if np.any(dK2dot_all_migrate<0):
+        alpha_crit = interp1d(dK2dot_all_migrate,alpha_vals)(0)
+        print(f"Convergent migration can produce the observed equilibrium at alpha = {alpha_crit:.2f}")
+
     plt.plot(alpha_vals,dK2dot_all_migrate,label="All planets migrate")
     plt.plot(alpha_vals,dK2dot_inner_halted,label="Inner planets halted")
     plt.xlabel("alpha (surface density power law index)")
