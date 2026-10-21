@@ -1,14 +1,12 @@
 import numpy as np
 import sys
-sys.path.insert(0,"../00_code/")
-
 import argparse
 from celmech.disturbing_function import list_resonance_terms
 from resonant_chains import get_chain_rebound_sim, get_chain_hpert, ResonantChainPoissonSeries
 from scipy.optimize import linear_sum_assignment
 import sympy as sp
 data_path = "/Users/hadden/Papers/10_chain_dynamics/03_data/"
-system_name = "Kepler-60"
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Compute damping rate coefficient for resonant chain equilibria"
@@ -24,27 +22,37 @@ def parse_args():
         type=int,
         help="Maximum order for the resonant chain Hamiltonian expansion"
     )
+    p.add_argument(
+        "--h0_order",
+        default=2,
+        type=int,
+        help="Maximum order for the resonant chain Hamiltonian expansion"
+    )
+
     return p.parse_args()
 
 def main():
     args = parse_args()
     system = args.system
     max_order = args.max_order
-    save_path = data_path+f"{system}/{system}_dissipation_info.npz"
-    eq_data = np.load(data_path+f"{system}/{system}_maxorder{max_order}.npz")
-    data = np.load(data_path+f"{system}/elliptic_eq_data.npz")
-    hpert = get_chain_hpert(eq_data['resonances'],eq_data['masses'],max_order,1)
+    h0_order = args.h0_order
+    save_path = data_path+f"{system}/{system}_dissipation_info_maxorder{max_order}_h0order{h0_order}_variable_migration.npz"
+    eq_data = np.load(data_path+f"{system}/{system}_maxorder{max_order}_h0order{h0_order}.npz")
+    data = np.load(data_path+f"{system}/elliptic_eq_data_maxorder{max_order}_h0order{h0_order}.npz")
+    hpert = get_chain_hpert(eq_data['resonances'],eq_data['masses'],max_order)
     rc = ResonantChainPoissonSeries(
         eq_data['resonances'],
         eq_data['masses'],
-        hpert,max_order = max_order
+        hpert,max_order = max_order, h0_order= h0_order
     )
     i_kappa2 = rc.N_planar 
     Npl = rc.N_planar
     Ninf = np.ones(rc.N_planar) * np.inf
     damping_rate_coeffs = np.zeros((data['eqs'].shape[0],(rc.N_planar + rc.M) + 1,Npl))
+    d_gamma1_dlna1_coeffs = np.zeros((data['eqs'].shape[0],(rc.N_planar + rc.M) + 1))
     eigvecs = np.zeros((data['eqs'].shape[0],(rc.N_planar + rc.M) + 1,2*(rc.N_planar + rc.M) + 1),dtype=complex)
-
+    delta1 = sp.symbols("delta1",real=True)
+    gamma1 = sp.symbols("gamma_m1",real=True)
     for i,(dK2,z_eq,freqs) in enumerate(zip(data['dK2vals'],data['eqs'],data['freqs'])):
         
         z_extended_eq = np.insert(z_eq,[-rc.M],[dK2])
@@ -79,15 +87,25 @@ def main():
 
         eigvecs[i] = vecs_extended
         j_dis_symb = rc.planar_dissipation_jacobian_symbolic(
-            np.insert(z_extended_eq,i_kappa2,0)
+            np.insert(z_extended_eq,i_kappa2,0),
+            p=1,
+            variable_migration=True      
         )
         j_dis_symb = np.delete(np.delete(j_dis_symb,i_kappa2,axis=0),i_kappa2,axis=1)
-        damping_rates = [sp.re(_) for _ in np.diag(covecs_extended @ j_dis_symb @ vecs_extended.T)]
+        damping_rates = [sp.re(_.expand()) for _ in np.diag(covecs_extended @ j_dis_symb @ vecs_extended.T)]
         damping_rate_coeffs[i] = np.array([
             [rate.coeff(g) for g in sp.symbols("gamma_e(1:{})".format(Npl+1),real=True)]
             for rate in damping_rates
-        ],dtype=float)    
-    np.savez(save_path,damping_rate_coeffs=damping_rate_coeffs,eigvecs=eigvecs,dK2vals=data['dK2vals'],freqs=data['freqs'])
+        ],dtype=float)
+        d_gamma1_dlna1_coeffs[i] = np.array([rate.coeff(delta1)/gamma1 for rate in damping_rates],dtype=float)    
+    np.savez(
+        save_path,
+        damping_rate_coeffs=damping_rate_coeffs,
+        eigvecs=eigvecs,
+        d_gamma1_dlna1_coeffs=d_gamma1_dlna1_coeffs,
+        dK2vals=data['dK2vals'],
+        freqs=data['freqs']
+    )
 
 if __name__ =="__main__":
     main()

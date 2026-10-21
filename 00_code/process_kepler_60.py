@@ -2,6 +2,7 @@ from resonantstate.data_download  import get_metadata_observations, download_obs
 from resonantstate.analyse_samples import *
 from resonant_chain_utils import Deltas_to_pvars
 from resonant_chains import get_chain_hpert, ResonantChainPoissonSeries,newton_solve2
+from celmech.miscellaneous import sundman_convergence
 # load pandas data on system
 df_all_obs = get_metadata_observations()
 system_name = "Kepler-60"
@@ -60,6 +61,7 @@ if not save_path.exists():
         periods=np.asarray(periods),
         system_name=np.asarray(system_name),
         max_order=np.asarray(max_order),
+        h0_order=np.asarray(h0_order)
     )
 
     print(f"Saved cached equilibrium to: {save_path}")
@@ -70,8 +72,14 @@ else:
     dK20 = data["dK2"]
     eqC = data["equilibrium"]
     resonances = data['resonances']
-    hpert = get_chain_hpert(data["resonances"],data["masses"],3,1)
-    rc = ResonantChainPoissonSeries(data["resonances"],data["masses"],hpert,max_order = data["max_order"])
+    hpert = get_chain_hpert(data["resonances"],data["masses"],max_order=max_order,max_order_dl=1)
+    rc = ResonantChainPoissonSeries(
+        data["resonances"],
+        data["masses"],
+        hpert,
+        max_order = data["max_order"],
+        h0_order = data["h0_order"]
+    )
     rc.dK2 = dK20
     print(f"Loaded cached equilibrium from: {save_path}")
 
@@ -96,6 +104,7 @@ Periods = np.zeros((dK2vals.size,rc.N_planar))
 kappa2_dot = np.zeros(dK2vals.size)
 Z = np.zeros((dK2vals.size,rc.N_planar-1))
 f_res,g_res = np.transpose([get_fg_coefficients(j,k) for j,k in resonances])
+sundmanQ = np.zeros((dK2vals.size,),dtype=bool)
 
 for i,dK2val in enumerate(dK2vals):
     rc.dK2 = dK2val
@@ -113,6 +122,7 @@ for i,dK2val in enumerate(dK2vals):
     Periods[i] = [p.P for p in pvars.particles[1:]]
     X=np.insert(guess,[rc.N_planar,2*rc.N_planar+rc.M],[0,rc.dK2])
     kappa2_dot[i] = rc.planar_full_flow(X)[rc.N_planar]
+    sundmanQ[i] = sundman_convergence(pvars)
     for l,jk in enumerate(resonances):
         pin = pvars.particles[1+l]
         pout = pvars.particles[2+l]
@@ -129,5 +139,6 @@ np.savez(
     jacobians = jacobians,
     kappa2_dot = kappa2_dot,
     Z = Z,
-    eccs = eccs
+    eccs = eccs,
+    sundman_convergence = sundmanQ
 )

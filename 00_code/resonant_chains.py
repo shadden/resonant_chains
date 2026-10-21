@@ -861,8 +861,8 @@ class ResonantChainPoissonSeries():
     @property
     def M(self):
         return self.h_series.M
-    
-    def planar_dissipation_flow(self,X,tau_e,tau_m,p=0):
+        
+    def planar_dissipation_flow(self,X,tau_e,tau_m,p=0,dln_gamma_d_lna=0):
         #
         # X = y_1,...,y_N,kappa_2,phi_1,...,phi_M,x_1,...,x_N,dK2,Phi_1,...,Phi_M
         #
@@ -872,10 +872,26 @@ class ResonantChainPoissonSeries():
         assert X.size==Ndim, "Input 'X' has dimension ({},) but should be dimension ({},)".format(X.size,Ndim)
         Npl = self.N_planar
         rho = self.Lambda0s/self.Lambda0s[0]
+        y = X[:self.N_planar]
+        K2_and_Phi = X[N_dof + self.N_planar:]
+        x = X[N_dof:N_dof+self.N_planar]
+        actions = np.zeros(2 + self.N_planar + self.M)
+        actions[1:self.M + 2] = K2_and_Phi
+        actions[self.M + 2:] = 0.5 * (x*x + y*y)
+        old_actions = self.Tmtrx.T @ np.concatenate((actions,np.zeros(self.N_planar))) # zero inclination actions
+        dLambda_by_Lambdas = old_actions[:self.N_planar] / rho
+
         e_sq = np.array([X[i]**2 + X[i+Npl+self.M+1]**2   for i in range(Npl)])/rho
+        dln_gamma_d_lna = np.broadcast_to(
+            np.asarray(dln_gamma_d_lna), (Npl,)
+        )
 
         dis_vec = np.zeros(Ndim)
-        gamma_a = 1/tau_m + 2 * p * e_sq / tau_e
+        gamma_m = 1/tau_m
+        gamma_a = gamma_m
+        gamma_a += 2 * p * e_sq / tau_e
+        # !!! new term below !!!
+        gamma_a += gamma_m * (1 + 2 * dln_gamma_d_lna) * dLambda_by_Lambdas
     
         Tinv_transpose = self.Tmtrx_inv.T
         
@@ -896,67 +912,157 @@ class ResonantChainPoissonSeries():
             dis_vec[2*Npl + self.M+1 ] +=  gamma_e * (X[i]**2 + X[i+Npl+self.M+1]**2)
         return dis_vec
 
-    def planar_dissipation_jacobian(self,X,tau_e,tau_m,p=0):
+    def planar_dissipation_jacobian(
+        self, X, tau_e, tau_m, p=0, dln_gamma_d_lna=0
+    ):
         #
-        # X = y_1,...,y_N,kappa_2,phi_1,...,phi_M,x_1,...,x_N,dK2,Phi_1,...,Phi_M
+        # X = y_1,...,y_N,kappa_2,phi_1,...,phi_M,
+        #     x_1,...,x_N,dK2,Phi_1,...,Phi_M
         #
         # dlna/dt = -1/tau_m - 2 p e^2/tau_e
-        Ndim = 2*(self.M+self.N_planar+1)
-        assert X.size==Ndim, "Input 'X' has dimension ({},) but should be dimension ({},)".format(X.size,Ndim)
+        #
+        N_dof = self.M + self.N_planar + 1
+        Ndim = 2 * N_dof
+
+        assert X.size == Ndim, (
+            "Input 'X' has dimension ({},) but should be dimension ({},)"
+            .format(X.size, Ndim)
+        )
+
         Npl = self.N_planar
-        rho = self.Lambda0s/self.Lambda0s[0]
-        dis_jac = np.zeros((Ndim,Ndim))
-        D_gamma_a = np.zeros((Npl,Ndim))
+        rho = self.Lambda0s / self.Lambda0s[0]
+        dln_gamma_d_lna = np.broadcast_to(
+            np.asarray(dln_gamma_d_lna), (Npl,)
+        )
+
+
+        dis_jac = np.zeros((Ndim, Ndim))
+        D_gamma_a = np.zeros((Npl, Ndim))
 
         Tinv_transpose = self.Tmtrx_inv.T
 
-        nu_vec = Tinv_transpose[0,:Npl]
+        # ------------------------------------------------------------
+        # Derivatives of the original eccentricity-dependent gamma_a
+        # ------------------------------------------------------------
         for i in range(Npl):
-            i_x = i+Npl+self.M+1
-            D_gamma_a[i,i] = 4 * p * X[i] / tau_e[i] / rho[i]
-            D_gamma_a[i,i_x] = 4 * p * X[i_x] / tau_e[i] / rho[i]
+            i_x = i + Npl + self.M + 1
+
+            D_gamma_a[i, i] = (
+                4 * p * X[i] / tau_e[i] / rho[i]
+            )
+            D_gamma_a[i, i_x] = (
+                4 * p * X[i_x] / tau_e[i] / rho[i]
+            )
+
+        # ------------------------------------------------------------
+        # NEW:
+        # Derivatives of dLambda_by_Lambdas with respect to X
+        #
+        # actions[1:M+2] = [dK2, Phi_1, ..., Phi_M]
+        # actions[M+2:]   = (x_i^2 + y_i^2)/2
+        # ------------------------------------------------------------
+
+        Nactions = self.M + Npl + 2
+        D_actions = np.zeros((Nactions, Ndim))
+
+        # Derivatives of K2_and_Phi actions
+        i_dK2 = 2 * Npl + self.M + 1
+
+        for j in range(self.M + 1):
+            D_actions[1 + j, i_dK2 + j] = 1.0
+
+        # Derivatives of eccentricity actions
+        for i in range(Npl):
+            i_y = i
+            i_x = i + Npl + self.M + 1
+
+            D_actions[self.M + 2 + i, i_y] = X[i_y]
+            D_actions[self.M + 2 + i, i_x] = X[i_x]
+
+        # old_actions = Tmtrx.T @ [actions, inclination_actions]
+        #
+        # Only `actions` depend on X, so we only need the corresponding
+        # columns of Tmtrx.T.
+        D_old_Lambdas = (
+            self.Tmtrx.T[:Npl, :Nactions] @ D_actions
+        )
+
+        # dLambda_by_Lambdas = old_actions[:Npl] / rho
+        D_dLambda_by_Lambdas = D_old_Lambdas / rho[:, None]
+
+        # Add derivative of the new contribution to gamma_a
+        gamma_m = 1 / tau_m
+
+        D_gamma_a += (
+            gamma_m * (1 + 2 * dln_gamma_d_lna)
+        )[:, None] * D_dLambda_by_Lambdas
+
+        # ------------------------------------------------------------
+        # Remaining calculation unchanged
+        # ------------------------------------------------------------
+
+        nu_vec = Tinv_transpose[0, :Npl]
 
         K1_by_L10 = nu_vec @ rho
+
         D_K1_by_L10 = -0.5 * (rho * nu_vec) @ D_gamma_a
 
-        for i,a_i in enumerate(Tinv_transpose[1:self.M+2,:Npl]):    
+        for i, a_i in enumerate(Tinv_transpose[1:self.M+2, :Npl]):
             i_P = 2 * Npl + self.M + 1 + i
-            dis_jac[i_P] += -0.5 * rho * a_i @ D_gamma_a / K1_by_L10
-            dis_jac[i_P] += -1 * (a_i @ rho) * D_K1_by_L10 / (K1_by_L10**2)
+
+            dis_jac[i_P] += (
+                -0.5 * rho * a_i @ D_gamma_a / K1_by_L10
+            )
+
+            dis_jac[i_P] += (
+                -(a_i @ rho)
+                * D_K1_by_L10
+                / K1_by_L10**2
+            )
+
         dis_jac *= nu_vec @ rho
 
-        i_dK2 = 2 * Npl + self.M+1 
-        for i in range(Npl):
-            gamma_e = 1/tau_e[i]
-            dis_jac[i,i] += -1 * gamma_e
-            i_x = i+Npl+self.M+1
-            dis_jac[i_x,i_x] += -1 * gamma_e
-            # dK2
-            dis_jac[i_dK2,i] += 2 * gamma_e * X[i]
-            dis_jac[i_dK2,i_x] += 2 * gamma_e * X[i_x]
-        return dis_jac
+        # ------------------------------------------------------------
+        # Eccentricity damping terms
+        # ------------------------------------------------------------
 
-    def planar_flow_with_dissipation(self,X,tau_e,tau_a,p):
+        i_dK2 = 2 * Npl + self.M + 1
+
+        for i in range(Npl):
+            gamma_e = 1 / tau_e[i]
+
+            dis_jac[i, i] += -gamma_e
+
+            i_x = i + Npl + self.M + 1
+            dis_jac[i_x, i_x] += -gamma_e
+
+            # dK2
+            dis_jac[i_dK2, i] += 2 * gamma_e * X[i]
+            dis_jac[i_dK2, i_x] += 2 * gamma_e * X[i_x]
+
+        return dis_jac
+    
+    def planar_flow_with_dissipation(self,X,tau_e,tau_a,p,dln_gamma_d_lna = 0):
         shape = 2*(self.N_planar+self.M) + 1
         msg = "Input X has dimensions {} but should be size ({},)".format(X.shape,shape)
         assert X.size==2*(self.N_planar+self.M) + 1, msg
         i_kappa2 = self.N_planar
         X_full = np.insert(X,i_kappa2,0.)
         f_cons = self.planar_full_flow(X_full)
-        f_dis = self.planar_dissipation_flow(X_full,tau_e,tau_a,p)
+        f_dis = self.planar_dissipation_flow(X_full,tau_e,tau_a,p,dln_gamma_d_lna)
         return np.delete(f_cons+f_dis,i_kappa2)
     
-    def planar_jacobian_with_dissipation(self,X,tau_e,tau_a,p):
+    def planar_jacobian_with_dissipation(self,X,tau_e,tau_a,p,dln_gamma_d_lna=0):
         shape = 2*(self.N_planar+self.M) + 1
         msg = "Input X has dimensions {} but should be size ({},)".format(X.shape,shape)
         assert X.size==2*(self.N_planar+self.M) + 1, msg
         i_kappa2 = self.N_planar
         X_full = np.insert(X,i_kappa2,0.)
         jac_cons = self.planar_full_jacobian(X_full)
-        jac_dis = self.planar_dissipation_jacobian(X_full,tau_e,tau_a,p)
+        jac_dis = self.planar_dissipation_jacobian(X_full,tau_e,tau_a,p,dln_gamma_d_lna)
         return np.delete(np.delete(jac_cons+jac_dis,i_kappa2,axis=0),i_kappa2,axis=1)    
     
-    def planar_flow_and_jacobian_with_dissipation(self,X,tau_e,tau_a,p):
+    def planar_flow_and_jacobian_with_dissipation(self,X,tau_e,tau_a,p,dln_gamma_d_lna = 0):
         shape = 2*(self.N_planar+self.M) + 1
         msg = "Input X has dimensions {} but should be size ({},)".format(X.shape,shape)
         assert X.size==2*(self.N_planar+self.M) + 1, msg
@@ -964,8 +1070,8 @@ class ResonantChainPoissonSeries():
         X_full = np.insert(X,i_kappa2,0.)
         f_cons,jac_cons = self.planar_full_flow_and_jacobian(X_full)
         
-        f_dis = self.planar_dissipation_flow(X_full,tau_e,tau_a,p)
-        jac_dis = self.planar_dissipation_jacobian(X_full,tau_e,tau_a,p)
+        f_dis = self.planar_dissipation_flow(X_full,tau_e,tau_a,p,dln_gamma_d_lna)
+        jac_dis = self.planar_dissipation_jacobian(X_full,tau_e,tau_a,p,dln_gamma_d_lna)
         
         f_tot = np.delete(f_cons+f_dis,i_kappa2)
         jac_tot = np.delete(np.delete(jac_cons+jac_dis,i_kappa2,axis=0),i_kappa2,axis=1)
@@ -1117,7 +1223,167 @@ class ResonantChainPoissonSeries():
         Q = real_vars[self.N:self.N+self.M]
         return np.concatenate((y[:self.N_planar],Q,x[:self.N_planar],P))
     
-    def planar_dissipation_jacobian_symbolic(self,X,p=1):
+    def planar_dissipation_jacobian_symbolic(self, X, p=1, variable_migration=False):
+        if variable_migration:
+            return self._planar_dissipation_jacobian_symbolic_variable_migration(X, p=p)
+        else:
+            return self._planar_dissipation_jacobian_symbolic_constant_migration(X, p=p)
+
+    def _planar_dissipation_jacobian_symbolic_variable_migration(self, X, p=1):
+        #
+        # X = y_1,...,y_N,kappa_2,phi_1,...,phi_M,
+        #     x_1,...,x_N,dK2,Phi_1,...,Phi_M
+        #
+        # dlna/dt = -gamma_m - 2 p e^2 gamma_e
+        #
+
+        Npl = self.N_planar
+        N_dof = self.M + Npl + 1
+        Ndim = 2 * N_dof
+
+        # Eccentricity damping rates
+        gamma_e = sp.symbols(
+            "gamma_e(1:{})".format(Npl + 1),
+            real=True
+        )
+
+        # Migration rates
+        gamma_m = sp.symbols(
+            "gamma_m(1:{})".format(Npl + 1),
+            real=True
+        )
+
+        # Logarithmic derivatives of migration rates
+        dln_gamma_d_lna = sp.symbols(
+            "delta(1:{})".format(Npl + 1),
+            real=True
+        )
+
+        rho = self.Lambda0s / self.Lambda0s[0]
+
+        dis_jac = np.zeros((Ndim, Ndim), dtype=object)
+        D_gamma_a = np.zeros((Npl, Ndim), dtype=object)
+
+        Tinv_transpose = self.Tmtrx_inv.T
+
+        # ------------------------------------------------------------
+        # Eccentricity-dependent contribution to gamma_a
+        #
+        # gamma_a,i = gamma_m,i
+        #           + 2 p e_i^2 gamma_e,i
+        #           + gamma_m,i (1 + 2 q_i) dLambda_i/Lambda_i
+        #
+        # where q_i = d ln(gamma_m,i) / d ln(a_i)
+        # ------------------------------------------------------------
+
+        for i in range(Npl):
+            i_x = i + Npl + self.M + 1
+
+            D_gamma_a[i, i] = (
+                4 * p * X[i] * gamma_e[i] / rho[i]
+            )
+
+            D_gamma_a[i, i_x] = (
+                4 * p * X[i_x] * gamma_e[i] / rho[i]
+            )
+
+        # ------------------------------------------------------------
+        # Derivative of dLambda_by_Lambdas with respect to X
+        # ------------------------------------------------------------
+
+        Nactions = self.M + Npl + 2
+        D_actions = np.zeros((Nactions, Ndim), dtype=object)
+
+        # actions[1:M+2] = [dK2, Phi_1, ..., Phi_M]
+        i_dK2 = 2 * Npl + self.M + 1
+
+        for j in range(self.M + 1):
+            D_actions[1 + j, i_dK2 + j] = 1
+
+        # actions[M+2:] = (x_i^2 + y_i^2)/2
+        for i in range(Npl):
+            i_y = i
+            i_x = i + Npl + self.M + 1
+
+            D_actions[self.M + 2 + i, i_y] = X[i_y]
+            D_actions[self.M + 2 + i, i_x] = X[i_x]
+
+        # old_actions = Tmtrx.T @ [actions, zero inclination actions]
+        D_old_Lambdas = (
+            self.Tmtrx.T[:Npl, :Nactions] @ D_actions
+        )
+
+        # dLambda_by_Lambdas = old_actions[:Npl] / rho
+        D_dLambda_by_Lambdas = (
+            D_old_Lambdas / rho[:, None]
+        )
+
+        # ------------------------------------------------------------
+        # New migration-gradient contribution
+        # ------------------------------------------------------------
+
+        for i in range(Npl):
+            D_gamma_a[i, :] += (
+                gamma_m[i]
+                * (1 + 2 * dln_gamma_d_lna[i])
+                * D_dLambda_by_Lambdas[i, :]
+            )
+
+        # ------------------------------------------------------------
+        # Transform to resonant variables
+        # ------------------------------------------------------------
+
+        nu_vec = Tinv_transpose[0, :Npl]
+
+        K1_by_L10 = nu_vec @ rho
+
+        D_K1_by_L10 = (
+            -0.5 * (rho * nu_vec) @ D_gamma_a
+        )
+
+        for i, a_i in enumerate(
+            Tinv_transpose[1:self.M + 2, :Npl]
+        ):
+            i_P = 2 * Npl + self.M + 1 + i
+
+            dis_jac[i_P] += (
+                -0.5
+                * rho
+                * a_i
+                @ D_gamma_a
+                / K1_by_L10
+            )
+
+            dis_jac[i_P] += (
+                -(a_i @ rho)
+                * D_K1_by_L10
+                / K1_by_L10**2
+            )
+
+        dis_jac *= nu_vec @ rho
+
+        # ------------------------------------------------------------
+        # Direct eccentricity damping terms
+        # ------------------------------------------------------------
+
+        for i in range(Npl):
+
+            dis_jac[i, i] += -gamma_e[i]
+
+            i_x = i + Npl + self.M + 1
+            dis_jac[i_x, i_x] += -gamma_e[i]
+
+            # dK2
+            dis_jac[i_dK2, i] += (
+                2 * gamma_e[i] * X[i]
+            )
+
+            dis_jac[i_dK2, i_x] += (
+                2 * gamma_e[i] * X[i_x]
+            )
+
+        return dis_jac
+    def _planar_dissipation_jacobian_symbolic_constant_migration(self,X,p=1):
         #
         # X = y_1,...,y_N,kappa_2,phi_1,...,phi_M,x_1,...,x_N,dK2,Phi_1,...,Phi_M
         #

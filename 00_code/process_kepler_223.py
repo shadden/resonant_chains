@@ -2,6 +2,7 @@ from resonantstate.data_download  import get_metadata_observations, download_obs
 from resonantstate.analyse_samples import *
 from resonant_chain_utils import Deltas_to_pvars
 from resonant_chains import get_chain_hpert, ResonantChainPoissonSeries,newton_solve2
+from celmech.miscellaneous import sundman_convergence
 # load pandas data on system
 df_all_obs = get_metadata_observations()
 system_name = "Kepler-223"
@@ -15,9 +16,10 @@ import numpy as np
 cache_dir = Path("/Users/hadden/Papers/10_chain_dynamics/03_data") / system_name
 cache_dir.mkdir(parents=True, exist_ok=True)
 max_order = 5
+h0_order = 4
 
 # make the filename depend on what matters
-fname = f"{system_name}_maxorder{max_order}.npz"
+fname = f"{system_name}_maxorder{max_order}_h0order{h0_order}.npz"
 save_path = cache_dir / fname
 
 # ----------------------------
@@ -41,7 +43,7 @@ if not save_path.exists():
     # --- compute ---
 
     hpert = get_chain_hpert(resonances,masses,max_order,1)
-    rc = ResonantChainPoissonSeries(resonances,masses,hpert,max_order = max_order)
+    rc = ResonantChainPoissonSeries(resonances,masses,hpert,max_order = max_order, h0_order = h0_order)
     pvars = Deltas_to_pvars([0.001 for _ in resonances],resonances,masses)
     rvars, dK20 = rc.pvars_to_real_vars(pvars)
     print(dK20)
@@ -88,7 +90,11 @@ else:
     eqC = data["equilibrium"]
     resonances = data['resonances']
     hpert = get_chain_hpert(data["resonances"],data["masses"],max_order=data["max_order"], max_order_dl=1)
-    rc = ResonantChainPoissonSeries(data["resonances"],data["masses"],hpert,max_order = data["max_order"])
+    rc = ResonantChainPoissonSeries(
+        data["resonances"],data["masses"],
+        hpert,
+        max_order = data["max_order"],h0_order=h0_order
+    )
     rc.dK2 = dK20
     print(f"Loaded cached equilibrium from: {save_path}")
 
@@ -113,6 +119,7 @@ Periods = np.zeros((dK2vals.size,rc.N_planar))
 kappa2_dot = np.zeros(dK2vals.size)
 Z = np.zeros((dK2vals.size,rc.N_planar-1))
 f_res,g_res = np.transpose([get_fg_coefficients(j,k) for j,k in resonances])
+sundmanQ = np.zeros((dK2vals.size,),dtype=bool)
 
 for i,dK2val in enumerate(dK2vals):
     rc.dK2 = dK2val
@@ -130,6 +137,7 @@ for i,dK2val in enumerate(dK2vals):
     Periods[i] = [p.P for p in pvars.particles[1:]]
     X=np.insert(guess,[rc.N_planar,2*rc.N_planar+rc.M],[0,rc.dK2])
     kappa2_dot[i] = rc.planar_full_flow(X)[rc.N_planar]
+    sundmanQ[i] = sundman_convergence(pvars)
     for l,jk in enumerate(resonances):
         pin = pvars.particles[1+l]
         pout = pvars.particles[2+l]
@@ -138,7 +146,7 @@ for i,dK2val in enumerate(dK2vals):
         Z[i,l] = np.abs((f_res[l] * zin + g_res[l] * zout) / np.sqrt(f_res[l] ** 2 + g_res[l] ** 2))
 
 np.savez(
-    cache_dir / "elliptic_eq_data.npz",
+    cache_dir / f"elliptic_eq_data_maxorder{max_order}_h0order{h0_order}.npz",
     dK2vals = dK2vals,
     eqs = eqsC,
     Periods = Periods,
@@ -146,5 +154,6 @@ np.savez(
     jacobians = jacobians,
     kappa2_dot = kappa2_dot,
     Z = Z,
-    eccs = eccs
+    eccs = eccs,
+    sundman_convergence = sundmanQ
 )

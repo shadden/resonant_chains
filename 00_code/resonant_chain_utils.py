@@ -40,6 +40,12 @@ def relative_damping_rate_tau_wave(masses,resonances,alpha = 1,beta = 0.25):
         Power-law index for the semi-major axis dependence of the surface density profile. Default is is 1.
     beta : float, optional
         Power-law index for the semi-major axis dependence of the disk flaring (H/R ~ a^beta). Default is 0.25.
+    Returns
+    -------
+    gamma_rel_a : list of floats
+        Relative damping rates for semi-major axis (tau_a) compared to the innermost planet.
+    gamma_rel_e : list of floats
+        Relative damping rates for eccentricity (tau_e) compared to the innermost planet.
     """
     taus = 1 / masses
     periods = np.cumprod(np.array([1] + list(map(lambda x: x[0]/(x[0]-x[1]),resonances))))

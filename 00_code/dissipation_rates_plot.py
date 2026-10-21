@@ -7,9 +7,7 @@ import matplotlib.gridspec as gridspec
 sys.path.insert(0,"../00_code/")
 from pathlib import Path
 import argparse
-from celmech.disturbing_function import list_resonance_terms
 from resonant_chains import get_chain_rebound_sim, get_chain_hpert, ResonantChainPoissonSeries
-from scipy.optimize import linear_sum_assignment
 import sympy as sp
 from scipy.interpolate import interp1d
 data_path = "/Users/hadden/Papers/10_chain_dynamics/03_data/"
@@ -23,6 +21,19 @@ def parse_args():
         default="Kepler-60",
         help="System to analyze"
     )
+    p.add_argument(
+        "--max_order",
+        default=3,
+        type=int,
+        help="Maximum order for the resonant chain Hamiltonian expansion"
+    )
+    p.add_argument(
+        "--h0_order",
+        default=2,
+        type=int,
+        help="Maximum order for the resonant chain Hamiltonian expansion"
+    )
+
     p.add_argument(
         "--plot_e",
         action='store_true',
@@ -45,17 +56,21 @@ def parse_args():
 def main():
     args = parse_args()
     system = args.system
-    diss_rate_path = data_path+f"{system}/{system}_dissipation_info.npz"
+    max_order = args.max_order
+    h0_order = args.h0_order
+    diss_rate_path = data_path+f"{system}/{system}_dissipation_info_maxorder{max_order}_h0order{h0_order}.npz"
     z_data_path = data_path+f"{system}/pairZs.npy.npz"
+
+    data = np.load(data_path+f"{system}/elliptic_eq_data_maxorder{max_order}_h0order{h0_order}.npz")
     diss_rate_data = np.load(diss_rate_path)
-    data = np.load(data_path+f"{system}/elliptic_eq_data.npz")
     gamma_e_coeffs = diss_rate_data["damping_rate_coeffs"]
 
-    freqs = data['freqs']
-    dK2vals = 1e3 * data['dK2vals']
-    eccs = data['eccs']
-    Zs = data['Z']
-    kappa2_dot = data['kappa2_dot']
+    mask = data['sundman_convergence']
+    freqs = data['freqs'][mask]
+    dK2vals = 1e3 * data['dK2vals'][mask]
+    eccs = data['eccs'][mask]
+    Zs = data['Z'][mask]
+    kappa2_dot = data['kappa2_dot'][mask]
     N_dof = freqs.shape[1]
     Npl = N_dof//2 + 1
     N_fast = Npl - 1
@@ -70,7 +85,7 @@ def main():
 
     # Colormap and normalization
     cmap = plt.get_cmap('RdBu')
-    ymin, ymax = np.min(dK2vals), np.max(dK2vals)
+    ymin, ymax = np.min(dK2vals), np.max(dK2vals)#-1.5 * np.min(dK2vals)
     xmin, xmax = 0.5, Npl + 0.5
 
     linthresh = np.percentile(np.abs(gamma_e_coeffs), 34)
@@ -182,6 +197,8 @@ def main():
     cbar = fig.colorbar(im, cax=cax)
     cbar.ax.tick_params(labelsize=12)
     cbar.set_label(r"$c_{ij}$", fontsize=15, labelpad=10, rotation=270)
+    for ax in axes:
+        ax.set_ylim(ymin, ymax)
     if args.save_plot:
         save_path = args.save_plot
         fig.savefig(save_path, bbox_inches='tight', dpi=300)

@@ -69,7 +69,7 @@ def get_second_order_three_br_terms(
         (not transformed to new variables where the three-body angles are explicit).
     """
     Npl = len(resonances) + 1
-    kvecs_3br = resonant_chain_variables_transformation_matrix(resonances)[2:Npl,:Npl]
+    kvecs_3br = resonant_chain_variables_transformation_matrix(resonances,max_order=1)[2:Npl,:Npl]
     assert np.all(np.isclose(kvecs_3br,np.round(kvecs_3br))),"kvecs_3br should be integer-valued for the resonant term filter to work properly."
     kvecs_3br = kvecs_3br.astype(int)
     assert np.all([np.gcd.reduce(kvec) == 1 for kvec in kvecs_3br]), "kvecs_3br should be primitive integer vectors for the resonant term filter to work properly."
@@ -119,7 +119,7 @@ def get_three_br_Hav_series(masses,resonances,Delta_in,
                            include_primary_resonances = True
                            ):
         Npl = len(resonances) + 1
-        kvecs_3br = resonant_chain_variables_transformation_matrix(resonances)[2:Npl,:Npl]
+        kvecs_3br = resonant_chain_variables_transformation_matrix(resonances,max_order=1)[2:Npl,:Npl]
         assert np.all(np.isclose(kvecs_3br,np.round(kvecs_3br))),"kvecs_3br should be integer-valued for the resonant term filter to work properly."
         kvecs_3br = kvecs_3br.astype(int)
         assert np.all([np.gcd.reduce(kvec) == 1 for kvec in kvecs_3br]), "kvecs_3br should be primitive integer vectors for the resonant term filter to work properly."

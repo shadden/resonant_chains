@@ -2,7 +2,6 @@ import numpy as np
 import rebound as rb
 from celmech.miscellaneous import frequency_modified_fourier_transform as fmft
 from resonantstate.data_download  import get_metadata_observations, download_observations_samples
-from resonantstate.analyse_samples import *
 from argparse import ArgumentParser
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -221,7 +220,7 @@ def main():
     df = data['samples']
 
     # load cached dynamics data
-    dynamics_data = np.load(f"/Users/hadden/Papers/10_chain_dynamics/03_data/{system_name}/{system_name}_maxorder3.npz")
+    dynamics_data = np.load(f"/Users/hadden/Papers/10_chain_dynamics/03_data/{system_name}/{system_name}_maxorder3_h0order{4}.npz")
     resonances = dynamics_data['resonances']
 
     all_fmft_results = []

@@ -2,8 +2,9 @@ from resonantstate.data_download  import get_metadata_observations, download_obs
 from resonantstate.analyse_samples import *
 from resonant_chain_utils import Deltas_to_pvars
 from resonant_chains import get_chain_hpert, ResonantChainPoissonSeries,newton_solve2
+from celmech.miscellaneous import sundman_convergence
 # load pandas data on system
-df_all_obs = get_metadata_observations()
+#df_all_obs = get_metadata_observations()
 system_name = "HD110067"
 
 import pandas as pd
@@ -59,9 +60,10 @@ def get_planet_params():
 cache_dir = Path("/Users/hadden/Papers/10_chain_dynamics/03_data") / system_name
 cache_dir.mkdir(parents=True, exist_ok=True)
 max_order = 3
+h0_order = 2
 
 # make the filename depend on what matters
-fname = f"{system_name}_maxorder{max_order}.npz"
+fname = f"{system_name}_maxorder{max_order}_h0order{h0_order}.npz"
 save_path = cache_dir / fname
 
 # ----------------------------
@@ -107,6 +109,7 @@ if not save_path.exists():
         periods=np.asarray(periods),
         system_name=np.asarray(system_name),
         max_order=np.asarray(max_order),
+        h0_order=np.asarray(h0_order)
     )
 
     print(f"Saved cached equilibrium to: {save_path}")
@@ -143,7 +146,7 @@ Periods = np.zeros((dK2vals.size,rc.N_planar))
 kappa2_dot = np.zeros(dK2vals.size)
 Z = np.zeros((dK2vals.size,rc.N_planar-1))
 f_res,g_res = np.transpose([get_fg_coefficients(j,k) for j,k in resonances])
-
+sundmanQ = np.zeros((dK2vals.size,),dtype=bool)
 for i,dK2val in enumerate(dK2vals):
     rc.dK2 = dK2val
     guess = newton_solve2(rc.planar_flow_and_jacobian,guess)
@@ -160,12 +163,14 @@ for i,dK2val in enumerate(dK2vals):
     Periods[i] = [p.P for p in pvars.particles[1:]]
     X=np.insert(guess,[rc.N_planar,2*rc.N_planar+rc.M],[0,rc.dK2])
     kappa2_dot[i] = rc.planar_full_flow(X)[rc.N_planar]
+    
     for l,jk in enumerate(resonances):
         pin = pvars.particles[1+l]
         pout = pvars.particles[2+l]
         zin = pin.e * np.exp(1j * pin.pomega)
         zout = pout.e * np.exp(1j * pout.pomega)
         Z[i,l] = np.abs((f_res[l] * zin + g_res[l] * zout) / np.sqrt(f_res[l] ** 2 + g_res[l] ** 2))
+        sundmanQ[i] = sundman_convergence(pvars)
 
 np.savez(
     cache_dir / "elliptic_eq_data.npz",
@@ -176,6 +181,7 @@ np.savez(
     jacobians = jacobians,
     kappa2_dot = kappa2_dot,
     Z = Z,
-    eccs = eccs
+    eccs = eccs,
+    sundman_convergence = sundmanQ
 )
 
