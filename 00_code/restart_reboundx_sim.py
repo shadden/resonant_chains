@@ -27,22 +27,8 @@ def extend_simulation(
     reboundx_file = Path(reboundx_file)
 
     # Load the last snapshot of the Simulationarchive.
-    sa = rebound.Simulationarchive(str(archive_file))
-    sim = sa[-1]
-
-    # Restore the REBOUNDx configuration.
-    rebx = reboundx.Extras(sim)
-    rebx.load(str(reboundx_file))
-    archive_file = Path(archive_file)
-    reboundx_file = Path(reboundx_file)
-
-    # Load the last snapshot of the Simulationarchive.
-    sa = rebound.Simulationarchive(str(archive_file))
-    sim = sa[-1]
-
-    # Restore the REBOUNDx configuration.
-    rebx = reboundx.Extras(sim)
-    rebx.load(str(reboundx_file))
+    sa = reboundx.Simulationarchive(str(archive_file),str(reboundx_file))
+    sim,extras = sa[-1]
 
     # Get the innermost planet (assuming particle 0 is the star).
     inner = min(
@@ -76,7 +62,11 @@ def extend_simulation(
 
     # Continue writing snapshots to the existing archive.
     # The original snapshot interval is retained.
-    sim.save_to_file(str(archive_file), delete_file=False)
+    sim.save_to_file(
+        str(archive_file),
+        interval=snapshot_interval,
+        delete_file=False
+        )
 
     # Extend the integration.
     sim.integrate(t_end)
