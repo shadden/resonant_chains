@@ -17,6 +17,85 @@ from pathlib import Path
 import rebound
 import reboundx
 
+
+import numpy as np
+
+
+def type_I_tau_e(sim, inner, force, linear=True):
+    """
+    Calculate the eccentricity damping timescale from REBOUNDx's
+    type_I_migration disk parameters.
+
+    Parameters
+    ----------
+    sim : rebound.Simulation
+    inner : rebound.Particle
+        Planet for which to calculate tau_e.
+    force : reboundx.Force
+        Loaded type_I_migration force.
+    linear : bool
+        If True, return the small-eccentricity, zero-inclination
+        damping timescale.
+
+    Returns
+    -------
+    float
+        Eccentricity damping timescale in simulation time units.
+    """
+    star = sim.particles[0]
+    orbit = inner.orbit(primary=star)
+    a, e, inc = orbit.a, orbit.e, orbit.inc
+
+    s = force.params["tIm_surface_density_exponent"]
+    beta = force.params["tIm_flaring_index"]
+    sigma_1 = force.params["tIm_surface_density_1"]
+    h_1 = force.params["tIm_scale_height_1"]
+
+    # Evaluate the disk profiles at the planet's semimajor axis.
+    sigma = sigma_1 * a**(-s)
+    h = h_1 * a**beta
+
+    t_wave = (
+        star.m**1.5 * h**4
+        / (inner.m * sigma * np.sqrt(sim.G * a))
+    )
+
+    tau_e = t_wave / 0.78
+
+    if not linear:
+        eh = e / h
+        ih = inc / h
+        tau_e *= (
+            1.0 - 0.14 * eh**2
+            + 0.06 * eh**3
+            + 0.18 * eh * ih**2
+        )
+
+    return tau_e
+
+
+def get_inner_tau_e(sim, extras, inner):
+    """
+    Determine the inner planet's eccentricity damping timescale
+    from either tau_e particle parameters or type_I_migration.
+    """
+    # First try explicitly specified eccentricity damping.
+    try:
+        return abs(inner.params["tau_e"])
+    except (KeyError, AttributeError):
+        pass
+
+    # Otherwise look for the Type I migration force.
+    try:
+        force = extras.get_force("type_I_migration")
+    except (KeyError, AttributeError, RuntimeError):
+        raise ValueError(
+            "Could not determine the eccentricity damping timescale: "
+            "the inner planet has no tau_e parameter and "
+            "type_I_migration could not be retrieved."
+        )
+    return type_I_tau_e(sim, inner, force)
+
 def extend_simulation(
     archive_file,
     reboundx_file,
@@ -36,8 +115,8 @@ def extend_simulation(
         key=lambda p: p.a
     )
 
-    # Read the eccentricity damping timescale.
-    tau_e = abs(inner.params["tau_e"])
+    # Determine tau_e from the appropriate damping prescription.
+    tau_e = get_inner_tau_e(sim, extras, inner)
 
     # Convert the requested final time to simulation units.
     t_end = t_end_tau_e * tau_e
